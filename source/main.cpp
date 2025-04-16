@@ -1,6 +1,6 @@
+#include <D3D12/D3dx12.h>
 #include <combaseapi.h>
 #include <d3d12.h>
-#include <D3dx12.h>
 #include <dxgi.h>
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
@@ -64,9 +64,20 @@ Microsoft::WRL::ComPtr<IDXGISwapChain1> tempSwapChain;
 
 SDL_Window* window = SDL_CreateWindow("SDL3 + DirectX12", width, height, 0);
 
-HWND hwnd = (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_CREATE_WIN32_HWND_POINTER, NULL);
+HWND hwnd = (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+
+if(!hwnd){
+  std::cerr<<"The hwnd from sdl is failed:"<<SDL_GetError();
+}
+
+std::cout<<"The hwnd value is:"<<hwnd;
 
 hr = factory->CreateSwapChainForHwnd(commandQueue.Get(), hwnd, &swapChainDesc, nullptr, nullptr, &tempSwapChain);
+
+if(FAILED(hr)){
+  std::cerr<<"failed to create swap chain";
+  return 1;
+}
 
 hr = tempSwapChain.As(&swapChain);
 
@@ -89,8 +100,6 @@ for(UINT i = 0; i < 2; i++){
   device->CreateRenderTargetView(renderTargets[i].Get(), nullptr, rtvHandle);
   rtvHandle.Offset(1, rtvDescriptorSize);
 }
-
-
 
 
 if (!window) {
