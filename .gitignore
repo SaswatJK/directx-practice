@@ -5,3 +5,4 @@ build\*.ilk
 build\*.obj
 build\*.pdb
 build/
+lib/
