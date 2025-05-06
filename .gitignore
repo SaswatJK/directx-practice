@@ -1,3 +1,7 @@
 build.bat
 .clangd
-build\
+build\*.exe
+build\*.ilk
+build\*.obj
+build\*.pdb
+build/

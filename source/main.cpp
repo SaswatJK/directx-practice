@@ -5,13 +5,16 @@
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
 #include <dxgiformat.h>
+#include <intsafe.h>
 #include <iostream>
+#include "D3D12/d3d12.h"
 #include "SDL3/SDL.h"
 #include "SDL3/SDL_error.h"
 #include "SDL3/SDL_log.h"
 #include "SDL3/SDL_properties.h"
 #include "SDL3/SDL_video.h"
 #include "glm/glm.hpp"
+#include <ratio>
 #include <wrl.h>
 #include <wrl/client.h>
 
@@ -45,6 +48,7 @@ for (UINT i = 0; DXGI_ERROR_NOT_FOUND != factory->EnumAdapters1(i, &hardwareAdap
 Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue;
 D3D12_COMMAND_QUEUE_DESC queueDesc = {};
 queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+//The rest of the properties of the struct is 0 for basic simpel command queue
 hr = device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue));
 
 unsigned int width = 800;
@@ -55,7 +59,7 @@ DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
 swapChainDesc.BufferCount = 2;
 swapChainDesc.Width = width;
 swapChainDesc.Height = height;
-swapChainDesc.Format = DXGI_FORMAT_R16G16B16A16_UNORM;
+swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 swapChainDesc.SampleDesc.Count = 1;
@@ -75,6 +79,11 @@ std::cout<<"The hwnd value is:"<<hwnd;
 hr = factory->CreateSwapChainForHwnd(commandQueue.Get(), hwnd, &swapChainDesc, nullptr, nullptr, &tempSwapChain);
 
 if(FAILED(hr)){
+if (hr == DXGI_ERROR_DEVICE_REMOVED) {
+    std::cerr << "Device removed. Please check your GPU connection.";
+} else if (hr == DXGI_ERROR_INVALID_CALL) {
+    std::cerr << "Invalid call. Verify your parameters.";
+}
   std::cerr<<"failed to create swap chain";
   return 1;
 }
@@ -100,6 +109,21 @@ for(UINT i = 0; i < 2; i++){
   device->CreateRenderTargetView(renderTargets[i].Get(), nullptr, rtvHandle);
   rtvHandle.Offset(1, rtvDescriptorSize);
 }
+
+Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocator;
+hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator));
+
+if(FAILED(hr)){
+  std::cerr<<"Command Alocator createion error";
+}
+
+Microsoft::WRL::ComPtr<ID3D12CommandList> commandList;
+hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList));
+
+if(FAILED(hr)){
+  std::cerr<<"Command list createion error";
+}
+
 
 
 if (!window) {
