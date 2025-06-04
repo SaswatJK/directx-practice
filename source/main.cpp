@@ -19,6 +19,8 @@
 #include <wrl.h>
 #include <wrl/client.h>
 
+// WE CAN USE QueryInterface to convert 1s to 3s. Like SwapChain1 to SwapChain3 and others like it.
+
 //Basic vertex struct for uniformity
 struct Vertex{
   float position[3];
@@ -39,21 +41,28 @@ if (SDL_Init(SDL_INIT_VIDEO) == false) {
 Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
 HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
 
-Microsoft::WRL::ComPtr<ID3D12Device> device;
-Microsoft::WRL::ComPtr<IDXGIAdapter1> hardwareAdapter;
+Microsoft::WRL::ComPtr<IDXGIAdapter1> hardwareAdapter; // A real phyislca device
+Microsoft::WRL::ComPtr<ID3D12Device> device; // A device is basiaclly a way to represent a physical piece of adapter (like a GPU, be it discrete or integrated)
 
 for (UINT i = 0; DXGI_ERROR_NOT_FOUND != factory->EnumAdapters1(i, &hardwareAdapter); ++i) {
-  if (SUCCEEDED(D3D12CreateDevice(hardwareAdapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)))) {
+  if (SUCCEEDED(D3D12CreateDevice(hardwareAdapter.Get(), D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device)))) {
     break;
     }
   }
   if(!device)
   std::cout<<"The device failed to create for d3d12 \n";
 
-Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue;
-D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+//Checking to see what tier of raytracing my GPU supports
+//D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
+//device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5));
+//std::cout<<"The tier is: "<<options5.RaytracingTier;
+
+Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue; //Submit commands to the GPU, which are collected and then executed in bulk. We don't want the GPU to wait for the CPU or vice versa while commands are being collected.
+
+D3D12_COMMAND_QUEUE_DESC queueDesc = {}; //Describing what kind of queue we want
+queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT; //Allows all operations, whether they are graphics, compute or copy. Despite every command type being allowed, only command lists with type DIRECT are allowed to be submitted.
 //The rest of the properties of the struct is 0 for basic simpel command queue
+
 hr = device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue));
 
 unsigned int width = 800;
@@ -61,26 +70,26 @@ unsigned int height = 800;
 
 Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain;
 DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
-swapChainDesc.BufferCount = 2;
-swapChainDesc.Width = width;
-swapChainDesc.Height = height;
-swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+swapChainDesc.BufferCount = 2; //Swapchain buffers 2 of them
+swapChainDesc.Width = width; //Width of the swapchain, if 0, the runtime will obtain the width from the window itself.
+swapChainDesc.Height = height; //height of the swapchain
+swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; //format of the colors for the swapchain
+swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT; //used as an output render target
+swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD; //Will discard the ontents of the backbuffer after we call the Present method
 swapChainDesc.SampleDesc.Count = 1;
 
 Microsoft::WRL::ComPtr<IDXGISwapChain1> tempSwapChain;
 
 SDL_Window* window = SDL_CreateWindow("SDL3 + DirectX12", width, height, 0);
 
-HWND hwnd = (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+HWND hwnd = (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL); //HWND pointer for the window intialized by SDL
 
 if(!hwnd){
   std::cerr<<"The hwnd from sdl is failed:"<<SDL_GetError();
 }
 
 //std::cout<<"The hwnd value is:"<<hwnd;
-hr = factory->CreateSwapChainForHwnd(commandQueue.Get(), hwnd, &swapChainDesc, nullptr, nullptr, &tempSwapChain);
+hr = factory->CreateSwapChainForHwnd(commandQueue.Get(), hwnd, &swapChainDesc, nullptr, nullptr, &tempSwapChain); //We are creating swapchain for that window.
 
 if(FAILED(hr)){
 if (hr == DXGI_ERROR_DEVICE_REMOVED) {
@@ -93,45 +102,53 @@ if (hr == DXGI_ERROR_DEVICE_REMOVED) {
 }
 
 hr = tempSwapChain.As(&swapChain);
-//render texture descriptior heap
 
-Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvHeap;
+//render texture descriptior heap
+Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvHeap; //Remember to make a com object pointer for "easier" memory management for these interfaces
 D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
 rtvHeapDesc.NumDescriptors = 2; //Double buffering
-rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV; //Just saying this is a render target view(view is the saem thing as descriptor)
 
-hr = device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvHeap));
+hr = device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&rtvHeap));//We use the device to create stuff. Just like how we use a factory in dxgi to create stuff.
 
+//Basically rtv Heap knows that there will be 2 descriptors, so it will probably allocate memory for that
+//And then we can get the increment size of the rtv descriptor heaps for easy mathematics
 UINT rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-Microsoft::WRL::ComPtr<ID3D12Resource> renderTargets[2];
+Microsoft::WRL::ComPtr<ID3D12Resource> renderTargets[2]; //Double buffering
 
+//Basically this now returns the CPU handle that represents the start of the heap.
 D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvHeap->GetCPUDescriptorHandleForHeapStart();
 //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(rtvHeap->GetCPUDescriptorHandleForHeapStart());
 
 for(UINT i = 0; i < 2; i++){
-  hr = swapChain->GetBuffer(i, IID_PPV_ARGS(&renderTargets[i]));
-  device->CreateRenderTargetView(renderTargets[i].Get(), nullptr, rtvHandle);
-  rtvHandle.ptr += rtvDescriptorSize;
-  //rtvHandle.Offset(1, rtvDescriptorSize);
+  hr = swapChain->GetBuffer(i, IID_PPV_ARGS(&renderTargets[i])); //Get one of the swap chain's back buffers
+  device->CreateRenderTargetView(renderTargets[i].Get(), nullptr, rtvHandle); //basically rtv handle is where the newly created render target view will reside
+  rtvHandle.ptr += rtvDescriptorSize; //Put the render target and the descriptors and stuff at one 
+  //rtvHandle.Offset(1, rtvDescriptorSize); //For the Cd3dx12 helper library
 }
 
+//Device can make command allocator and command list, we uplaod rsoure and do draw calls and finish wrapping up teh ommand list and execute it through command list whle the allocator just prepares the list.
+//Command queues will execute command lists and signal fence
+
 Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocator;
-hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator));
+hr = device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)); //Since the queue is of type list_direct. We are basically allocating the memory required for a command list
 
 if(FAILED(hr)){
   std::cerr<<"Command Alocator createion error";
 }
+//Everytime a commandlist is reset, it will allocate a block of memory from the commandallocator, it will pile up. We can reset the command allocator, but if we do so, then we shouldn't use teh command list and execute it with the previously allocated memory. Not thread safe obiously, have more than one commandallocator per thread.
 
 Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandList;
-hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList));
+hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList)); //Same as before, but we get the commandAllocator's memory through the getter and then we put the memory of the commandList com
 
 if(FAILED(hr)){
   std::cerr<<"Command list createion error";
   return 1;
 }
 
-//This is for shaders. Like to be like "Hey the shader can take these resources and use it
+//This is for shaders. Like to be like "Hey the shader can take these resources and use it"
+//The root signature defines what resources are bound to teh graphics pipeline. A root signature is configured by teh app and links command lists to the resources the shader require.
 Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature;
 //CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
 //rootSignatureDesc.Init(0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
@@ -142,8 +159,9 @@ rootSignatureDesc.NumParameters = 0;
 rootSignatureDesc.pParameters = nullptr;
 rootSignatureDesc.NumStaticSamplers = 0;
 rootSignatureDesc.pStaticSamplers = nullptr;
-rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT; // The app is opting in to using the Input Assembler (requiring an input layout that defines a set of vertex buffer bindings). Omitting this flag can result in one root argument space being saved on some hardware. Omit this flag if the Input Assembler is not required, though the optimization is minor.
 
+//Blob is basically a binary format
 Microsoft::WRL::ComPtr<ID3DBlob> signature;
 Microsoft::WRL::ComPtr<ID3DBlob> error;
 
@@ -188,6 +206,7 @@ const char* pixelShaderSource = R"(
 Microsoft::WRL::ComPtr<ID3DBlob> vertexShader;
 Microsoft::WRL::ComPtr<ID3DBlob> pixelShader;
 
+//It's crazy that direct3d provides macros and includes and entrypoints customisation itself.
 hr = D3DCompile(vertexShaderSource, strlen(vertexShaderSource), nullptr, nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vertexShader, &error);
 if (FAILED(hr)) {
   std::cerr << "Vertex shader compilation failed!"<<std::endl;
@@ -209,7 +228,7 @@ D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
 
 //pieplien state object
 D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };
+psoDesc.InputLayout = { inputElementDescs, _countof(inputElementDescs) };//input layout description is a struct that contains an  array of element descrption and the number of the array members
 psoDesc.pRootSignature = rootSignature.Get();
 //psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
 //psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
@@ -238,7 +257,7 @@ rasterizerDesc.DepthClipEnable = TRUE;
 rasterizerDesc.MultisampleEnable = FALSE; //quadrilateral or aa on msaa. if quad, true
 rasterizerDesc.AntialiasedLineEnable = TRUE; //if multisample enable is false, use this
 rasterizerDesc.ForcedSampleCount = 0; //Sample count that is forced while UAV rendering. UAV is basically unordered access view, meaning the 'view' can be accesssed in any order, read write, rwrite read write, write read write read etc. If we are to do UAV stuff, like reading and writing to the same texture/buffer concurrently, we can set it over 0, this means the rasterizer acts as if multiple samples exist. So, the GPU processes multiple samples per pixel. It's like doing manual super sampling.
-rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF; //Read the GPU Gems algorithm on conservative rasterization. It's absolutely beautiful
+rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF; //Read the GPU Gems algorithm on conservative rasterization. It's absolutely beautiful. Basically making shit fatter for better inteserction tests.
 psoDesc.RasterizerState = rasterizerDesc;
 
 //Describes the way blending is done
@@ -266,6 +285,7 @@ psoDesc.NumRenderTargets = 1;
 psoDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 psoDesc.SampleDesc.Count = 1;
 
+// Represents the state of all currently set shaders as well as certain fixed function state objects.
 Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState;
 hr = device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&pipelineState));
 if (FAILED(hr)) {
@@ -276,7 +296,7 @@ if (FAILED(hr)) {
 Vertex triangleVertices[] = {
 	{ { 0.0f, 0.5f, 0.0f }, { 1.0f, 0.0f, 0.0f, 1.0f } },    // Top (red)
         { { 0.5f, -0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },   // Bottom right (green)
-        { { -0.5f, -0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f, 1.0f } }   // Bottom left (blue)    
+        { { -0.5f, -0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f, 1.0f } }   // Bottom left (blue)
 };
 
 const UINT vertexBufferSize = sizeof(triangleVertices);
@@ -287,7 +307,7 @@ Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer;
 
 D3D12_HEAP_PROPERTIES heapProps = {};
 heapProps.Type = D3D12_HEAP_TYPE_UPLOAD; //Type upload is the best for CPU read once and GPU write once Data. This type has CPU access optimized for uploading to the GPU. Resouurce on this Heap must be created with GENERIC_READ
-heapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN; //I used WRITE_COMBINE enum but it gave me error, so I have to use PROPERTY_UNKOWN. This ignores the cache and writes to a buffer, it's better for streaming data to another device like the GPU, but very inefficient if we wanna read for some reason from the same buffer this is pointing to.
+heapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN; //I used WRITE_COMBINE enum but it gave me error, so I have to use PROPERTY_UNKOWN. The write comobine ignores the cache and writes to a buffer, it's better for streaming data to another device like the GPU, but very inefficient if we wanna read for some reason from the same buffer this is pointing to.
 heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN; //I used MEMORY_POOL_L0 but it gave me error, so I have to use POOL_UNKOWN. L0 means the system memory (RAM), while L1 is the videocard memory (VRAM). If integrated graphics exists, this will be slower for the GPU but the CPU will be faster than the GPU. However it does still support APUs and Integrated Graphics, while if we use L1, it's only available for systems with their own graphics cards. It cannot be accessed by the CPU at all, so it's only GPU accessed.
 heapProps.CreationNodeMask = 1;
 heapProps.VisibleNodeMask = 1;
@@ -300,7 +320,8 @@ D3D12_RESOURCE_DESC bufferDesc = {};
 DXGI_SAMPLE_DESC sampleDesc = {}; //Multi sampling parameters
 sampleDesc.Count = 1;
 sampleDesc.Quality = 0;
-bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+
+bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;//Resource is a buffer and not a texture
 bufferDesc.Alignment = 0; //Default alignment
 bufferDesc.Width = vertexBufferSize;
 bufferDesc.Height = 1; //1D
@@ -315,7 +336,7 @@ hr = device->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &bufferDesc,
-	D3D12_RESOURCE_STATE_GENERIC_READ,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
         nullptr,
         IID_PPV_ARGS(&vertexBuffer));
     if (FAILED(hr)) {
@@ -324,28 +345,30 @@ hr = device->CreateCommittedResource(
     }
 
 // Copy vertices to the buffer
-
 UINT8* pVertexDataBegin;
 //CD3DX12_RANGE readRange(0, 0);
 D3D12_RANGE readRange = {};
 readRange.Begin = 0;
 readRange.End = 0;
+//This indicates the region the CPU might read, and the coordinates are subresource-relative. A null pointer indicates the entire subresource might be read by the CPU. It is valid to specify the CPU won't read any data by passing a range where End is less than or equal to Begin.
 
-hr = vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin));
+// Gets a CPU pointer to the specified subresource in the resource, but may not disclose the pointer value to applications. Map also invalidates the CPU cache, when necessary, so that CPU reads to this address reflect any modifications made by the GPU.
+hr = vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin));//We have described the resource vertexBuffer everything, it's size, where to store it, how to be used, but now we will allocate memory space and get pointers ready and everything
 if (FAILED(hr)) {
 std::cerr << "Failed to map vertex buffer" << std::endl;
 return 1;
 }
-memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
+memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices)); //We copied the vertex data to the mapped area finanlly.
 vertexBuffer->Unmap(0, nullptr);
 
+//This is like doign the VAO thing in OpenGL
 D3D12_VERTEX_BUFFER_VIEW vertexBufferView = {};
-vertexBufferView.BufferLocation = vertexBuffer->GetGPUVirtualAddress();
+vertexBufferView.BufferLocation = vertexBuffer->GetGPUVirtualAddress();//geting the gpu's pointer to the vertex buffer
 vertexBufferView.StrideInBytes = sizeof(Vertex);
 vertexBufferView.SizeInBytes = vertexBufferSize;
 
 // Create synchronization Objects
-
+//In order to await completion of command buffers in the command queue, we will need a synchronization structure known as a fence. A fence has an internal integer counter, and can trigger events on either the CPU or the GPU when the counter reaches a certain value. This can be done to trigger an event on the CPU when a command buffer is done executing, have the GPU wait while the CPU is completing a certain operation first, or to get two command queues on the GPU to wait upon one another.
 Microsoft::WRL::ComPtr<ID3D12Fence> fence;
 
 hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
@@ -361,11 +384,10 @@ if (fenceEvent == nullptr) {
 }
 
 // Main loop
-
 UINT frameIndex = 0;
 UINT64 fenceValue = 1;
 
-commandList->Close();
+commandList->Close(); //We close right now, or we could've closed as soon as we created the list because every command list created by d3d12 is creaetd in an open state.
 
 bool running = true;
 SDL_Event event;
@@ -382,20 +404,21 @@ while (running) {
       break;
     }
   }
-hr = commandAllocator->Reset();
+hr = commandAllocator->Reset(); //Resetting the allocator every time
         if (FAILED(hr)) {
             std::cerr << "Failed to reset command allocator" << std::endl;
             break;
         }
         
-        hr = commandList->Reset(commandAllocator.Get(), pipelineState.Get());
+        hr = commandList->Reset(commandAllocator.Get(), pipelineState.Get()); //Resting the list everytime before using a non reset list with a reset allocator (not a good idea)
         if (FAILED(hr)) {
             std::cerr << "Failed to reset command list" << std::endl;
             break;
         }
         
         // Set necessary state
-        commandList->SetGraphicsRootSignature(rootSignature.Get());
+        commandList->SetGraphicsRootSignature(rootSignature.Get()); //Making stuff ready for the shaders to understand
+	//As can be seen, very easy to change the root signature for shaders
 	//CD3DX12_VIEWPORT viewPort = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
 	D3D12_VIEWPORT viewPort = {};
 	viewPort.TopLeftX = 0.0f;
@@ -415,6 +438,7 @@ hr = commandAllocator->Reset();
         
         // Indicate the back buffer will be used as render target
         //CD3DX12_RESOURCE_BARRIER renderTarget =  CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+	// Resource barrier is used when we want to use the same resource (say a texture) to write and read both, and in that case, the applicaiton will tell the GPU that this resource is in a write-ready state or read-ready state,and the GPU will wait for the transition if it's trying to read and the resource is in write-ready state.
 	D3D12_RESOURCE_BARRIER renderTarget = {};
 	D3D12_RESOURCE_TRANSITION_BARRIER barrier = {};
 	barrier.pResource = renderTargets[frameIndex].Get();
@@ -425,22 +449,22 @@ hr = commandAllocator->Reset();
 	renderTarget.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
 	renderTarget.Transition = barrier;
 	commandList->ResourceBarrier(1, &renderTarget);
-        
+
         // Get the current RTV handle
         //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle( rtvHeap->GetCPUDescriptorHandleForHeapStart(), frameIndex, rtvDescriptorSize);
-        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = {};
+        //rtvHandle = {};
 	rtvHandle = rtvHeap->GetCPUDescriptorHandleForHeapStart(); //Start at the begining of the heap.
 	rtvHandle.ptr += frameIndex * rtvDescriptorSize; //Point to the rtv currently (which back buffer's RTV)
         // Clear the render target
-        const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+        const float clearColor[] = { 1.0f, 0.2f, 0.4f, 1.0f };
         commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-        commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
-        
+        commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr); //nullptr meaning no depth and stencil dsecriptor
+
         // Draw the triangle
         commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         commandList->IASetVertexBuffers(0, 1, &vertexBufferView);
         commandList->DrawInstanced(3, 1, 0, 0);
-        
+
         // Indicate the back buffer will now be used to present
 	//CD3DX12_RESOURCE_BARRIER presentTarget = CD3DX12_RESOURCE_BARRIER::Transition(renderTargets[frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 	D3D12_RESOURCE_BARRIER presentTarget = {};
@@ -449,48 +473,48 @@ hr = commandAllocator->Reset();
 	presentTarget.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
 	presentTarget.Transition = barrier;
         commandList->ResourceBarrier(1, &presentTarget);
-        
+
         // Close the command list
         hr = commandList->Close();
         if (FAILED(hr)) {
             std::cerr << "Failed to close command list" << std::endl;
             break;
         }
-        
+
         // Execute the command list
         ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
         commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
-        
+
         // Present the frame
         hr = swapChain->Present(1, 0);
         if (FAILED(hr)) {
             std::cerr << "Present failed" << std::endl;
             break;
         }
-        
+
         // Schedule a signal command
-        hr = commandQueue->Signal(fence.Get(), fenceValue);
+        hr = commandQueue->Signal(fence.Get(), fenceValue); //Will tell the GPU, after finishing all currentyly queued commands, set the fence to fencevalue, meaning after finishing it, it will set the GPU fence value to the fence value variable in the CPU
         if (FAILED(hr)) {
             std::cerr << "Failed to signal fence" << std::endl;
             break;
         }
-        
+
         // Wait for the frame to complete
-        if (fence->GetCompletedValue() < fenceValue) {
-            hr = fence->SetEventOnCompletion(fenceValue, fenceEvent);
+        if (fence->GetCompletedValue() < fenceValue) { //getcompletevalue is the value of the last fence if nothing is completed, and the new fence if things have been compelted
+            hr = fence->SetEventOnCompletion(fenceValue, fenceEvent); // tells the fence: "When you reach this value, wake up this Windows event"
             if (FAILED(hr)) {
                 std::cerr << "Failed to set fence event" << std::endl;
                 break;
             }
             WaitForSingleObject(fenceEvent, INFINITE);
         }
-        
+
         // Prepare for next frame
         frameIndex = swapChain->GetCurrentBackBufferIndex();
         fenceValue++;
     }
-    
-    // Wait for GPU to finish
+
+    // Wait for GPU to finish, or else, basically, since we only upgrade the fenceValue in the CPU through increment in the main loop, but the GPU has not been set because we quit the loop, it will run indefinetly. Not using this could cause memory corruption for GPU, Crashes, Driver problems
     if (fence->GetCompletedValue() < fenceValue - 1) {
         hr = fence->SetEventOnCompletion(fenceValue - 1, fenceEvent);
         if (SUCCEEDED(hr)) {
