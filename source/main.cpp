@@ -103,6 +103,8 @@ if (hr == DXGI_ERROR_DEVICE_REMOVED) {
 
 hr = tempSwapChain.As(&swapChain);
 
+//A descriptor heap is a collection of contiguous allocations of descriptors, one allocation for every descriptor. Descriptor heaps contain many object types that are not part of a Pipeline State Object (PSO), such as Shader Resource Views (SRVs), Unordered Access Views (UAVs), Constant Buffer Views (CBVs), and Samplers.
+
 //render texture descriptior heap
 Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvHeap; //Remember to make a com object pointer for "easier" memory management for these interfaces
 D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
@@ -147,6 +149,20 @@ if(FAILED(hr)){
   return 1;
 }
 
+//Need to make a descriptor Range for CBV
+D3D12_DESCRIPTOR_RANGE descriptorRange = {};
+descriptorRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+descriptorRange.NumDescriptors = 1;
+descriptorRange.BaseShaderRegister = 0;
+descriptorRange.RegisterSpace = 0;
+descriptorRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+D3D12_ROOT_PARAMETER rootParam = {};
+rootParam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+rootParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+rootParam.DescriptorTable.NumDescriptorRanges = 1;
+rootParam.DescriptorTable.pDescriptorRanges = &descriptorRange;
+
 //This is for shaders. Like to be like "Hey the shader can take these resources and use it"
 //The root signature defines what resources are bound to teh graphics pipeline. A root signature is configured by teh app and links command lists to the resources the shader require.
 Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature;
@@ -155,8 +171,8 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature;
 //Root signatures basically define the binding relationship betwween shader resource and the graphics pieline.
 // All the arguments in the helper method is basically the same thing as manually filling these descriptions themselves.
 D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
-rootSignatureDesc.NumParameters = 0;
-rootSignatureDesc.pParameters = nullptr;
+rootSignatureDesc.NumParameters = 1;
+rootSignatureDesc.pParameters = &rootParam;
 rootSignatureDesc.NumStaticSamplers = 0;
 rootSignatureDesc.pStaticSamplers = nullptr;
 rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT; // The app is opting in to using the Input Assembler (requiring an input layout that defines a set of vertex buffer bindings). Omitting this flag can result in one root argument space being saved on some hardware. Omit this flag if the Input Assembler is not required, though the optimization is minor.
@@ -192,13 +208,18 @@ const char* vertexShaderSource = R"(
 )";
     
 const char* pixelShaderSource = R"(
+    cbuffer Vec4Buffer : register (b0){
+        float4 myVec4;
+        float4 myVec5;
+    };
+
   struct PSInput {
     float4 position : SV_POSITION;
     float4 color : COLOR;
   };
         
   float4 PSMain(PSInput input) : SV_TARGET {
-    return input.color;
+    return myVec5;
     }
 )";
 
@@ -303,14 +324,14 @@ const UINT vertexBufferSize = sizeof(triangleVertices);
 
 Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer;
 
-//CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
+//CD3DX12_HEAP_PROPERTIES upHeapProps(D3D12_HEAP_TYPE_UPLOAD);
 
-D3D12_HEAP_PROPERTIES heapProps = {};
-heapProps.Type = D3D12_HEAP_TYPE_UPLOAD; //Type upload is the best for CPU read once and GPU write once Data. This type has CPU access optimized for uploading to the GPU. Resouurce on this Heap must be created with GENERIC_READ
-heapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN; //I used WRITE_COMBINE enum but it gave me error, so I have to use PROPERTY_UNKOWN. The write comobine ignores the cache and writes to a buffer, it's better for streaming data to another device like the GPU, but very inefficient if we wanna read for some reason from the same buffer this is pointing to.
-heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN; //I used MEMORY_POOL_L0 but it gave me error, so I have to use POOL_UNKOWN. L0 means the system memory (RAM), while L1 is the videocard memory (VRAM). If integrated graphics exists, this will be slower for the GPU but the CPU will be faster than the GPU. However it does still support APUs and Integrated Graphics, while if we use L1, it's only available for systems with their own graphics cards. It cannot be accessed by the CPU at all, so it's only GPU accessed.
-heapProps.CreationNodeMask = 1;
-heapProps.VisibleNodeMask = 1;
+D3D12_HEAP_PROPERTIES upHeapProps = {};
+upHeapProps.Type = D3D12_HEAP_TYPE_UPLOAD; //Type upload is the best for CPU read once and GPU write once Data. This type has CPU access optimized for uploading to the GPU. Resouurce on this Heap must be created with GENERIC_READ
+upHeapProps.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN; //I used WRITE_COMBINE enum but it gave me error, so I have to use PROPERTY_UNKOWN. The write comobine ignores the cache and writes to a buffer, it's better for streaming data to another device like the GPU, but very inefficient if we wanna read for some reason from the same buffer this is pointing to.
+upHeapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN; //I used MEMORY_POOL_L0 but it gave me error, so I have to use POOL_UNKOWN. L0 means the system memory (RAM), while L1 is the videocard memory (VRAM). If integrated graphics exists, this will be slower for the GPU but the CPU will be faster than the GPU. However it does still support APUs and Integrated Graphics, while if we use L1, it's only available for systems with their own graphics cards. It cannot be accessed by the CPU at all, so it's only GPU accessed.
+upHeapProps.CreationNodeMask = 1;
+upHeapProps.VisibleNodeMask = 1;
 
 //So from this, we can see that we have to create multiple bufers. This kind of reminds me of CUDA programming and doing device and host memcpys and everything, very low level and explicit.
 //Basically we will make an upload buffer and a default buffer where the GPU will do everything itself, and the CPU can't access, so unaviablabnel page property. Then we upload initial data to CPU then it will copy those things to the GPU and the GPU will solely work with it.
@@ -333,7 +354,7 @@ bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR; // Row Major is inefficient 
 bufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
 
 hr = device->CreateCommittedResource(
-        &heapProps,
+        &upHeapProps,
         D3D12_HEAP_FLAG_NONE,
         &bufferDesc,
         D3D12_RESOURCE_STATE_GENERIC_READ,
@@ -344,6 +365,54 @@ hr = device->CreateCommittedResource(
         return 1;
     }
 
+float colorValue[4] = {1.0f, 0.0f, 0.0f, 1.0f};
+float colorValue2[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+
+//MAking a Uniform buffer for a vector
+D3D12_RESOURCE_DESC uBufferDesc = {};
+DXGI_SAMPLE_DESC uSampleDesc = {}; //Multi sampling parameters
+uSampleDesc.Count = 1;
+uSampleDesc.Quality = 0;
+
+uBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;//Resource is a buffer and not a texture
+uBufferDesc.Alignment = 0; //Default alignment
+uBufferDesc.Width = 256;
+uBufferDesc.Height = 1; //1D
+uBufferDesc.DepthOrArraySize = 1; //1D
+uBufferDesc.MipLevels = 1;
+uBufferDesc.Format = DXGI_FORMAT_UNKNOWN; //Because buffers are typeless
+uBufferDesc.SampleDesc = uSampleDesc;
+uBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR; // Row Major is inefficient for extensive usage according to the document but buffers are created with D3D12_TEXTURE_LAYOUT_ROW_MAJOR, because row-major texture data can be located in them without creating a texture object. This is commonly used for uploading or reading back texture data, especially for discrete/NUMA adapters.
+uBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+Microsoft::WRL::ComPtr<ID3D12Resource> uniformBuffer;
+hr = device->CreateCommittedResource(&upHeapProps, D3D12_HEAP_FLAG_NONE, &uBufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&uniformBuffer));
+
+UINT8* mappedData = nullptr;
+uniformBuffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+memcpy(mappedData, &colorValue, 16);
+memcpy(mappedData+16, &colorValue2, 16);
+uniformBuffer->Unmap(0, nullptr);
+//Descriptor heap for the CBV (constant buffer View)
+Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> uniformHeap;
+D3D12_DESCRIPTOR_HEAP_DESC uHeapDesc = {};
+uHeapDesc.NumDescriptors = 1;
+uHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+uHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+hr = device->CreateDescriptorHeap(&uHeapDesc, IID_PPV_ARGS(&uniformHeap));
+if(FAILED(hr)){
+    std::cout<<"Descriptor Heap for CSV not made";
+    return -1;
+}
+
+// Describe the CBV itself
+D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+cbvDesc.BufferLocation = uniformBuffer->GetGPUVirtualAddress();
+cbvDesc.SizeInBytes = 256;
+
+device->CreateConstantBufferView(&cbvDesc, uniformHeap->GetCPUDescriptorHandleForHeapStart());
+
+//Now need to bind to the root signature
 // Copy vertices to the buffer
 UINT8* pVertexDataBegin;
 //CD3DX12_RANGE readRange(0, 0);
@@ -404,6 +473,8 @@ while (running) {
       break;
     }
   }
+
+//Uniforms are called constant buffers
 hr = commandAllocator->Reset(); //Resetting the allocator every time
         if (FAILED(hr)) {
             std::cerr << "Failed to reset command allocator" << std::endl;
@@ -417,8 +488,11 @@ hr = commandAllocator->Reset(); //Resetting the allocator every time
         }
         
         // Set necessary state
-        commandList->SetGraphicsRootSignature(rootSignature.Get()); //Making stuff ready for the shaders to understand
-	//As can be seen, very easy to change the root signature for shaders
+    commandList->SetGraphicsRootSignature(rootSignature.Get()); //Making stuff ready for the shaders to understand
+	ID3D12DescriptorHeap* dHeaps[] = { uniformHeap.Get() };
+    commandList->SetDescriptorHeaps(1, dHeaps);
+    commandList->SetGraphicsRootDescriptorTable(0, uniformHeap->GetGPUDescriptorHandleForHeapStart());
+    //As can be seen, very easy to change the root signature for shaders
 	//CD3DX12_VIEWPORT viewPort = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
 	D3D12_VIEWPORT viewPort = {};
 	viewPort.TopLeftX = 0.0f;
