@@ -11,6 +11,7 @@
 #include <SDL3/SDL.h>
 #include <windows.h>
 #include <intsafe.h>
+#include <wrl/client.h>
 #include "D3D12/d3d12.h"
 #include "D3D12/d3dcommon.h"
 #include "D3D12/dxgicommon.h"
@@ -149,7 +150,7 @@ int main(){
     memcpy(mappedData + 16, &metallic, 16);
     uniformBuffer->Unmap(0, nullptr);
 
-    //A vie is the same as a descriptor, this is a descriptor that goes in a descriptor heap
+    //A view is the same as a descriptor, this is a descriptor that goes in a descriptor heap
     D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
     cbvDesc.BufferLocation = uniformBuffer->GetGPUVirtualAddress(); //Remember that one resource and/or a subresource can have multiple descriptors referencing it
     cbvDesc.SizeInBytes = 256;
@@ -185,6 +186,8 @@ int main(){
         rtvHandle.ptr = rtvHandle.ptr + rtvDescriptorIncrementSize;
     }
 
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature;
+    //Descriptor range defines a contiguous sequence of resource descriptors of a specific type within a descriptor table. Like the 'width' of a slice, that is descriptor table, of a data, that is descriptor heap.
     D3D12_DESCRIPTOR_RANGE uniformRange = {};
     uniformRange.NumDescriptors = 1;
     uniformRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
@@ -195,18 +198,38 @@ int main(){
     D3D12_ROOT_DESCRIPTOR_TABLE uniformTable = {};
     uniformTable.NumDescriptorRanges = 1;
     uniformTable.pDescriptorRanges = &uniformRange;
+
+    //Root parameters define how resoureces are bound to the pipeline. We right now use descriptor tables, which are just pointers to a fixed range of data in a descriptor heap. One root parameter can onyl contain one descriptor table, so only one slice, which is why more than one may be required.
     D3D12_ROOT_PARAMETER rootParameterUniform = {};
     rootParameterUniform.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     rootParameterUniform.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     rootParameterUniform.DescriptorTable = uniformTable;
 
     D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
-    rootSignatureDesc.NumParameters = ;
-    rootSignatureDesc.pParameters = ;
-    rootSignatureDesc.NumStaticSamplers = ;
-    rootSignatureDesc.pStaticSamplers = ;
-    rootSignatureDesc.Flags = ;
-    // The root signature is the definition of an arbitrarily arranged collection of descriptor tables (including their layout), root constants and root descriptors.
-    D3D12SerializeRootSignature(const D3D12_ROOT_SIGNATURE_DESC *pRootSignature, D3D_ROOT_SIGNATURE_VERSION Version, ID3DBlob **ppBlob, ID3DBlob **ppErrorBlob)
+    rootSignatureDesc.NumParameters = 1;
+    rootSignatureDesc.pParameters = &rootParameterUniform;
+    rootSignatureDesc.NumStaticSamplers = 0;
+    rootSignatureDesc.pStaticSamplers = nullptr;
+    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+    Microsoft::WRL::ComPtr<ID3DBlob> signatureBlob; //Used to return data of an arbitrary length
+    Microsoft::WRL::ComPtr<ID3DBlob> errorBlob; //Same as above
+    // The root signature is the definition of an arbitrarily arranged collection of descriptor tables (including their layout), root constants and root descriptors. It basically describes the layout of resource used by the pipeline.
+
+    //'Serializing' a root signature means converting a root signature description from the desc structures, to a GPU readable state. We need to serialize into blobs the root signature, which talks about textures and buffers and where to find them and what not, and shaders, so the GPU can understand it.
+    D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1_0, &signatureBlob, &errorBlob);
+
+
+    hr = d3d12Device->CreateRootSignature(
+        0, // 0 for a single GPU, or else multipel GPU then have to decide which 'node' the signature needs to be applied to.
+        signatureBlob->GetBufferPointer(), //Pointer to the source data for the serialized signature.
+        signatureBlob->GetBufferSize(), //Size of the blob
+        IID_PPV_ARGS(&rootSignature));
+
+    if(FAILED(hr)){
+        std::cout<<"Root signature creation failed!";
+        return -1;
+    }
+
     return 0;
 }
