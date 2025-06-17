@@ -1,11 +1,13 @@
 #include <D3D12/D3dx12.h>
 #include <combaseapi.h>
+#include <cstring>
 #include <d3d12.h>
 #include <dxgi.h>
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
 #include <dxgiformat.h>
 #include <dxgicommon.h>
+#include <ratio>
 #include <wrl.h>
 #include <iostream>
 #include <SDL3/SDL.h>
@@ -15,9 +17,14 @@
 #include "D3D12/d3d12.h"
 #include "D3D12/d3dcommon.h"
 #include "D3D12/dxgicommon.h"
+#include "D3D12/dxgiformat.h"
 
 UINT width = 1000;
 UINT height = 1000;
+
+typedef struct{
+    float pos[3];
+}Vertex;
 
 int main(){
     SDL_Init(SDL_INIT_VIDEO);
@@ -217,19 +224,151 @@ int main(){
     // The root signature is the definition of an arbitrarily arranged collection of descriptor tables (including their layout), root constants and root descriptors. It basically describes the layout of resource used by the pipeline.
 
     //'Serializing' a root signature means converting a root signature description from the desc structures, to a GPU readable state. We need to serialize into blobs the root signature, which talks about textures and buffers and where to find them and what not, and shaders, so the GPU can understand it.
+    //This description is a CPU-side data structure describing how our shaders will access resources. To create a GPU-usable root signature (ID3D12RootSignature), our must serialize this description into a binary format.
     D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1_0, &signatureBlob, &errorBlob);
-
 
     hr = d3d12Device->CreateRootSignature(
         0, // 0 for a single GPU, or else multipel GPU then have to decide which 'node' the signature needs to be applied to.
         signatureBlob->GetBufferPointer(), //Pointer to the source data for the serialized signature.
         signatureBlob->GetBufferSize(), //Size of the blob
         IID_PPV_ARGS(&rootSignature));
-
     if(FAILED(hr)){
         std::cout<<"Root signature creation failed!";
         return -1;
     }
+    //Reminder for the future. I dont' need to make a root signature for index or vertex buffers. I only need to copy it into GPU memory, through memcpy, and I need to call IASetVertexBuffers, IASetIndexBuffer for it. So just make a d3d12 resource, map cpu resource to it, then call the function! I have to initailize the resource through resource_desc ofcourse, but it's not as crazy as the SRV or CBV ones.
+
+    //Pipeline state objects should be created upfront. They should be created at the start with all the possible rasterisation descriptions and the shader combinations. And use that to compile all the shader before hand. After that, they should be switched between scenes, rather than making a new PSO everytime we need it. This is where the 'precompilation' of shaders that are so common nowadays, comes in. So for better readability and managibility, define the other piepilne state structs first that should be common among all the pipeline states, like the rasterizer's properties. Then the shader's names shoudl reflect what it does and then be used for different pipeline states with their own names. Remember that PSO is the main hickup when it comes to game engines nowadays and the frametime spike that occurs.
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> simplePSO;
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC simplePSODesc = {};
+    //We will not be filling in StreamOutput or STREAM_OUTPUT_DESC because it's an output description for vertex shader output to a buffer, which is different from a FBO, where the fragment/pixel shader writes to a buffer.
+    //D3D12_STREAM_OUTPUT_DESC streamOutputDesc = {}; I won't have a stream output, so I don't need to fill this
+    D3D12_BLEND_DESC opaqueBlendDesc = {}; //Blending is done between background, and 'foreground' objects.
+    opaqueBlendDesc.AlphaToCoverageEnable = FALSE; //https://bgolus.medium.com/anti-aliased-alpha-test-the-esoteric-alpha-to-coverage-8b177335ae4f and it's link to https://www.humus.name/index.php?page=3D&ID=61 explains it.
+    opaqueBlendDesc.IndependentBlendEnable = FALSE;// If true, each render target can have it's own unique blend state. There's 8 remember that.
+    opaqueBlendDesc.RenderTarget[0] = {}; //This is an array of render target blend description structures. Since I said indpendent blend is false, I only need to configure one.
+    opaqueBlendDesc.RenderTarget[0].BlendEnable = FALSE;
+    opaqueBlendDesc.RenderTarget[0].LogicOpEnable = FALSE; //Cannot have both LogicOpEnable and BlendEnable to be true.
+    opaqueBlendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE; //Specifies the value to perform blending on the pixel shader output, performs before blending with the render target value. Blend factor that is used on the 'object' that will be blended to the render target (background).
+    opaqueBlendDesc.RenderTarget[0].DestBlend =  D3D12_BLEND_ZERO; //Specifies the value to perform blending on the current RGB value on the render target. Factor that is used on the 'background'.
+    // The 1 for source and 0 for destination makes this happen: FinalColor=(SrcColor×1)+(DestColor×0)=SrcColor (so opaque)
+    opaqueBlendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+    opaqueBlendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE; //Same thing as before, but this is specifically about the alpha's factor.
+    opaqueBlendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+    opaqueBlendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    opaqueBlendDesc.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_NOOP; //Operation to do while we writing to the render target.
+    opaqueBlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL; //Identifies which components of each pixel of a render target are writeable during blending. This allows for some whacky shaders if we only blend certain color channels. We can also just combine them iirc.
+    D3D12_RASTERIZER_DESC simpleRasterizerDesc = {};
+    simpleRasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
+    simpleRasterizerDesc.CullMode = D3D12_CULL_MODE_BACK; //Do not draw triangles that are front facing.
+    simpleRasterizerDesc.FrontCounterClockwise = FALSE; // Determines if a triangle is front- or back-facing. If this member is TRUE, a triangle will be considered front-facing if its vertices are counter-clockwise on the render target and considered back-facing if they are clockwise. If this parameter is FALSE, the opposite is true.
+    simpleRasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;//Remeber that we have a depth bias that we use for shadow mapping?
+    simpleRasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+    simpleRasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+    //Bias = (float)DepthBias * r + SlopeScaledDepthBias * MaxDepthSlope;
+    simpleRasterizerDesc.DepthClipEnable = TRUE; //The hardware clips the z value if true.
+    simpleRasterizerDesc.MultisampleEnable = FALSE; //True uses MSAA, false uses alphya line anti aliasing.
+    simpleRasterizerDesc.AntialiasedLineEnable = FALSE; //Can only be false if MSAA is true.
+    simpleRasterizerDesc.ForcedSampleCount = 0; //Sample count that is forced while UAV rendering. UAV is basically unordered access view, meaning the 'view' can be accesssed in any order, read write, write read write, write read write read etc. If we are to do UAV stuff, like reading and writing to the same texture/buffer concurrently, we can set it over 0, this means the rasterizer acts as if multiple samples exist. So, the GPU processes multiple samples per pixel. It's like doing manual super sampling.
+    simpleRasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF; //Read the GPU Gems algorithm on conservative rasterization. It's absolutely beautiful. Basically making shit fatter for better inteserction tests.
+    //D3D12_DEPTH_STENCIL_DESC dsDesc = {}; Not usign thise because we're not doign depth or stencil testing.
+    D3D12_INPUT_LAYOUT_DESC simpleInputLayoutDesc = {};
+    D3D12_INPUT_ELEMENT_DESC simpleInputElementDesc[] = {
+    "POSITION", //Semantic Name
+    0, //Semantic index
+    DXGI_FORMAT_R32G32B32_FLOAT, //format of the input, since we're using 4 byte floats in the CPU, we might as well use that in the GPU.
+    0, //Input slot. The IA stage has n input slots, which are designed to accommodate up to n vertex buffers that provide input data. Each vertex buffer must be assigned to a different slot
+    0, //Offset in bytes to this element from the start of the vertex.
+    D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, //A value that identifies the input data class for a single input slot.
+    0 //The number of instances to draw using the same per-instance data before advancing in the buffer by one element. If it's per vertex data, then set this value to 0.
+    };
+    simpleInputLayoutDesc.pInputElementDescs = simpleInputElementDesc;
+    simpleInputLayoutDesc.NumElements = 1; //Only vertex right now.
+    simplePSODesc.SampleMask = UINT_MAX; //The sample mask for the blend state. Use in Multisampling to selectively enable or disable certain/specific samples.
+    simplePSODesc.RasterizerState = simpleRasterizerDesc;
+    simplePSODesc.InputLayout = simpleInputLayoutDesc;
+    //simplePSODesc.IBStripCutValue, we are not filling this cause we don't have an index buffer.
+    simplePSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    simplePSODesc.NumRenderTargets = 1;
+    simplePSODesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    simplePSODesc.NodeMask = 0; //Remember just like the 'NodeMask' in the createrootsignature method, this is for multiGPU systems where we are using node masks to choose between GPUs.
+    simplePSODesc.pRootSignature = rootSignature.Get();
+
+    const char* simpleVSSource = R"(
+        //Remember how in glsl we use structs or even variables that we want to share from one shader to another, like vs to fs through an 'out' attributed variable or struct? We don't need to do that.
+        struct PSInput {
+            float4 position : SV_POSITION; //System-value semantic for clip-space position
+        };
+
+        PSInput VSMain(float3 position : POSITION ) { //Can name this whatever we want, however we need to set the entrypoint name whle compiling the shader.
+        PSInput result;
+        result.position = float4(position, 0.0f);
+        return result;
+        }
+    )";
+    const char* simplePSSource = R"(
+        cbuffer simpleUB : register(b0){
+            float4 color;
+            float4 metallic;
+        };
+        float4 PSMain() : SV_TARGET {
+            float4 finalColor = color;
+            return finalColor;
+        }
+    )";
+
+    Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    hr = D3DCompile(simpleVSSource, //source of the shader
+                    strlen(simpleVSSource),
+                    nullptr, //Use this parameter for strings that specify error messages, if not used then set to null.
+                    nullptr, //Array of shader macros! YEP!!
+                    nullptr, //Pointer to an id3dinclude for handling include fies. Set to NULL if no #include in the shader.
+                    "VSMain", //main functin entry point for shader.
+                    "vs_5_0", //Compiler target
+                    0,
+                    0,
+                    &vsBlob,
+                    &errorBlob);
+    if(FAILED(hr)){
+        std::cout<<"Failed to compile Vertex Shader";
+        return -1;
+    }
+    hr = D3DCompile(simplePSSource, //source of the shader
+                    strlen(simplePSSource),
+                    nullptr, //Use this parameter for strings that specify error messages, if not used then set to null.
+                    nullptr, //Array of shader macros! YEP!!
+                    nullptr, //Pointer to an id3dinclude for handling include fies. Set to NULL if no #include in the shader.
+                    "PSMain", //main functin entry point for shader.
+                    "ps_5_0", //Compiler target
+                    0,
+                    0,
+                    &psBlob,
+                    &errorBlob);
+    if(FAILED(hr)){
+        std::cout<<"Failed to compile Pixel Shader";
+        return -1;
+    }
+    D3D12_SHADER_BYTECODE vsByteCode;
+    vsByteCode.pShaderBytecode = vsBlob->GetBufferPointer(); //Bytecode's pointer to a memory.
+    vsByteCode.BytecodeLength = vsBlob->GetBufferSize();
+    D3D12_SHADER_BYTECODE psByteCode;
+    psByteCode.pShaderBytecode = psBlob->GetBufferPointer(); //Bytecode's pointer to a memory.
+    psByteCode.BytecodeLength = psBlob->GetBufferSize();
+
+    simplePSODesc.VS = vsByteCode;
+    simplePSODesc.PS = psByteCode;
+
+    //Will be using the same dxgi_sample_desc that I created for swap chain.
+    d3d12Device->CreateGraphicsPipelineState(&simplePSODesc, IID_PPV_ARGS(&simplePSO));
+
+    Vertex triangle[3] = {
+        {{-0.5, -0.5, 0}},
+        {{0, 0.5, 0}},
+        {{0.5, 0.5, 0}}
+    };
+
 
     return 0;
 }
