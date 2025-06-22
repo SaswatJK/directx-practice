@@ -27,6 +27,25 @@ struct Vertex{
   float color[4];
 };
 
+Microsoft::WRL::ComPtr<ID3D12InfoQueue> infoQueue;
+
+void PrintDebugMessages() {
+    UINT64 messageCount = infoQueue->GetNumStoredMessages();
+
+    for (UINT64 i = 0; i < messageCount; i++) {
+        SIZE_T messageLength = 0;
+        infoQueue->GetMessage(i, NULL, &messageLength);
+
+        D3D12_MESSAGE* message = (D3D12_MESSAGE*)malloc(messageLength);
+        infoQueue->GetMessage(i, message, &messageLength);
+
+        printf("D3D12 Message: %s\n", message->pDescription);
+        free(message);
+    }
+
+    infoQueue->ClearStoredMessages();
+}
+
 int main(){
 if (SDL_Init(SDL_INIT_VIDEO) == false) {
     //SDL_Log("SDL_Init failed: %s", SDL_GetError());
@@ -37,6 +56,12 @@ if (SDL_Init(SDL_INIT_VIDEO) == false) {
 
 // Inherits from all the IDXGIFactories before it. It implements methods for generating DXGI objects.
 // Some tasks are graphics API independent, like swapchains and page flipping, so we use DXGI instead of D3D
+
+Microsoft::WRL::ComPtr<ID3D12Debug> debugController;
+if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
+{
+    debugController->EnableDebugLayer();
+}
 
 Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
 HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
@@ -52,6 +77,7 @@ for (UINT i = 0; DXGI_ERROR_NOT_FOUND != factory->EnumAdapters1(i, &hardwareAdap
   if(!device)
   std::cout<<"The device failed to create for d3d12 \n";
 
+    device->QueryInterface(IID_PPV_ARGS(&infoQueue));
 //Checking to see what tier of raytracing my GPU supports
 //D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
 //device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5));
@@ -141,7 +167,7 @@ if(FAILED(hr)){
 }
 //Everytime a commandlist is reset, it will allocate a block of memory from the commandallocator, it will pile up. We can reset the command allocator, but if we do so, then we shouldn't use teh command list and execute it with the previously allocated memory. Not thread safe obiously, have more than one commandallocator per thread.
 
-Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandList;
+Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList10> commandList;
 hr = device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList)); //Same as before, but we get the commandAllocator's memory through the getter and then we put the memory of the commandList com
 
 if(FAILED(hr)){
@@ -285,7 +311,7 @@ psoDesc.RasterizerState = rasterizerDesc;
 D3D12_BLEND_DESC blendDesc = {};
 blendDesc.AlphaToCoverageEnable = FALSE; // https://bgolus.medium.com/anti-aliased-alpha-test-the-esoteric-alpha-to-coverage-8b177335ae4f and it's link to https://www.humus.name/index.php?page=3D&ID=61 explains it.
 blendDesc.IndependentBlendEnable = FALSE; // If true, each render target can have it's own unique blend state. There's 8 remember that.
-//blendDesc.RenderTarget[0]; //This is an array of render target blend description structures. Since I said indpendent blend is false, I only need to configure one.
+blendDesc.RenderTarget[0] = {}; //This is an array of render target blend description structures. Since I said indpendent blend is false, I only need to configure one.
 blendDesc.RenderTarget[0].BlendEnable = FALSE; //No blending
 blendDesc.RenderTarget[0].LogicOpEnable = FALSE; //Enable or disable a logical operation, can't be both blend able and this one true
 blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;  //Specifies the operation to perform on the value that the pixel shader outputs, performs before blending with the render target value
@@ -501,13 +527,14 @@ hr = commandAllocator->Reset(); //Resetting the allocator every time
 	viewPort.Height = static_cast<float>(height);
 	viewPort.MinDepth = D3D12_MIN_DEPTH;
 	viewPort.MaxDepth = D3D12_MAX_DEPTH;
-        commandList->RSSetViewports(1, &viewPort);
-	//CD3DX12_RECT rect = CD3DX12_RECT(0, 0, width, height);
+    commandList->RSSetViewports(1, &viewPort);
+	CD3DX12_RECT rect = CD3DX12_RECT(0, 0, width, height);
+    /*
 	D3D12_RECT rect = {};
+    rect.top = 0;
 	rect.left = 0;
-	rect.top = 0;
 	rect.right = width;
-	rect.bottom = height;
+	rect.bottom = height;*/
 	commandList->RSSetScissorRects(1, &rect);
         
         // Indicate the back buffer will be used as render target
@@ -586,15 +613,18 @@ hr = commandAllocator->Reset(); //Resetting the allocator every time
         // Prepare for next frame
         frameIndex = swapChain->GetCurrentBackBufferIndex();
         fenceValue++;
+        PrintDebugMessages();
     }
 
-    // Wait for GPU to finish, or else, basically, since we only upgrade the fenceValue in the CPU through increment in the main loop, but the GPU has not been set because we quit the loop, it will run indefinetly. Not using this could cause memory corruption for GPU, Crashes, Driver problems
-    if (fence->GetCompletedValue() < fenceValue - 1) {
+//What happens if we exit out of this loop through quitting or something during GPU work? We don't want the GPU to be left doing work, so we wait for the GPU to finish, or else it can cause memory corruption for GPU, Crashes, Driver problems etc.
+    if(fence->GetCompletedValue() < fenceValue - 1) { //Imagine before signalling or anything, fence value = 1 on the cpu, the value in the fence is 0, in this case, if we don't do -1, it will keep doing this, because we haven't asked the fence to signal at all. This is for that one thing where we say that the fence should signal the fence value, then we quit the game loop, however the commandqueue is still being executed.
         hr = fence->SetEventOnCompletion(fenceValue - 1, fenceEvent);
-        if (SUCCEEDED(hr)) {
-            WaitForSingleObject(fenceEvent, INFINITE);
+        if(FAILED(hr)){
+            std::cout<<"Failed to set fence event on completion outside the rendering loop!";
+            return -1;
         }
-}
+        WaitForSingleObject(fenceEvent, INFINITE);
+    }
 CloseHandle(fenceEvent);
 //SDL_Delay(3000);  // Show the window for 3 seconds
 SDL_DestroyWindow(window);
