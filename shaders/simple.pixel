@@ -1,0 +1,8 @@
+cbuffer simpleUB : register(b0){
+    float4 color;
+    float4 metallic;
+};
+float4 PSMain() : SV_TARGET {
+    float4 finalColor = color;
+    return finalColor;
+}
