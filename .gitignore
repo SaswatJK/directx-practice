@@ -6,3 +6,4 @@ build\*.obj
 build\*.pdb
 build/
 lib/
+source/oldmain.cpp
