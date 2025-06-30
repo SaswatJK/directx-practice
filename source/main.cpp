@@ -1,5 +1,12 @@
 #include "../include/utils.h"
 #include "../include/shader.h"
+#include "D3D12/d3d12.h"
+#include "D3D12/d3dx12_core.h"
+#include <combaseapi.h>
+#include <intsafe.h>
+#include <malloc.h>
+#include <wrl/client.h>
+#include <wrl/implements.h>
 
 UINT windowWidth = 1000;
 UINT windowHeight = 1000;
@@ -114,6 +121,7 @@ int main(){
     uploadHeapProperties.CreationNodeMask = 1;
     uploadHeapProperties.VisibleNodeMask = 1;
 
+    // Committed resource is the easiest way to create resource since we don't need to do heap management ourselves.
     //I wanted to use ID3D12Resource2 but it's so unimportant that these guys didn't even document it properly, there's no links to new features or to the old interface it has inherited from LMFAO
     Microsoft::WRL::ComPtr<ID3D12Resource> uniformBuffer;
     D3D12_RESOURCE_DESC uniformBufferDesc = {};
@@ -130,7 +138,6 @@ int main(){
     uniformBufferDesc.SampleDesc = uniformBufferSampleDesc;
     uniformBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     uniformBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
     //CreateComittedResource2 can also be used, it makes it easier to do memory management as it will handle the heapAllocation itself, however that means only one resource per heap, and no custom heap layouts. Now, while I have not used custom heap layouts till now, I think I don't want more abstracted things while learning.
     //CreateCommittedResourece3 uses layout rather than states for barriers and stuff, which should give more control for the memory of both GPU, CPU, and the access of either/or memory from either/or physical hardware (host or device)
     hr = d3d12Device->CreateCommittedResource(
@@ -155,7 +162,7 @@ int main(){
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> uniformHeap;
     D3D12_DESCRIPTOR_HEAP_DESC uniformHeapDesc = {};
-    uniformHeapDesc.NumDescriptors = 1;
+    uniformHeapDesc.NumDescriptors = 2;
     uniformHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     uniformHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     D3D12_CPU_DESCRIPTOR_HANDLE descHandle = {};
@@ -199,6 +206,30 @@ int main(){
         bbRTVHandle.ptr = bbRTVHandle.ptr + rtvDescriptorIncrementSize;
     }
 
+    //We create a samper, the thing with samplers is that they only need to be described and we only create a sampler resource view, and a sampler heap.
+    D3D12_DESCRIPTOR_HEAP_DESC samplerHeapDesc = {};
+    samplerHeapDesc.NumDescriptors = 1;
+    samplerHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    samplerHeapDesc.NodeMask = 0;
+    samplerHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
+
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> samplerHeap;
+    D3D12_SAMPLER_DESC samplerDesc = {};
+    samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+    samplerDesc.MinLOD = 0.0f;
+    samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+    samplerDesc.MipLODBias = 0.0f;
+    samplerDesc.MaxAnisotropy = 1;
+    samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+
+    d3d12Device->CreateDescriptorHeap(&samplerHeapDesc, IID_PPV_ARGS(&samplerHeap));
+
+    D3D12_CPU_DESCRIPTOR_HANDLE samplerHandle = samplerHeap->GetCPUDescriptorHandleForHeapStart();
+    d3d12Device->CreateSampler(&samplerDesc, samplerHandle);
+
     Microsoft::WRL::ComPtr<ID3D12RootSignature> uRootSignature;
     //Descriptor range defines a contiguous sequence of resource descriptors of a specific type within a descriptor table. Like the 'width' of a slice, that is descriptor table, of a data, that is descriptor heap.
     D3D12_DESCRIPTOR_RANGE uniformRange = {};
@@ -208,9 +239,28 @@ int main(){
     uniformRange.BaseShaderRegister = 0;
     uniformRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
+    D3D12_DESCRIPTOR_RANGE textureRange = {};
+    textureRange.NumDescriptors = 1;
+    textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    textureRange.RegisterSpace = 0;
+    textureRange.BaseShaderRegister = 0;
+    textureRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    D3D12_DESCRIPTOR_RANGE srvRanges[] = { uniformRange, textureRange };
     D3D12_ROOT_DESCRIPTOR_TABLE uniformTable = {};
-    uniformTable.NumDescriptorRanges = 1;
-    uniformTable.pDescriptorRanges = &uniformRange;
+    uniformTable.NumDescriptorRanges = 2;
+    uniformTable.pDescriptorRanges = srvRanges;
+
+    D3D12_DESCRIPTOR_RANGE samplerRange = {};
+    samplerRange.NumDescriptors = 1;
+    samplerRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+    samplerRange.RegisterSpace = 0;
+    samplerRange.BaseShaderRegister = 0;
+    samplerRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+
+    D3D12_ROOT_DESCRIPTOR_TABLE samplerTable = {};
+    samplerTable.NumDescriptorRanges = 1;
+    samplerTable.pDescriptorRanges = &samplerRange;
 
     //Root parameters define how resoureces are bound to the pipeline. We right now use descriptor tables, which are just pointers to a fixed range of data in a descriptor heap. One root parameter can onyl contain one descriptor table, so only one slice, which is why more than one may be required.
     D3D12_ROOT_PARAMETER rootParameterUniform = {};
@@ -218,9 +268,15 @@ int main(){
     rootParameterUniform.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     rootParameterUniform.DescriptorTable = uniformTable;
 
+    D3D12_ROOT_PARAMETER rootParameterSampler = {};
+    rootParameterSampler.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParameterSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    rootParameterSampler.DescriptorTable = samplerTable;
+
+    D3D12_ROOT_PARAMETER rootParams[] = { rootParameterUniform, rootParameterSampler };
     D3D12_ROOT_SIGNATURE_DESC uRootSignatureDesc = {};
-    uRootSignatureDesc.NumParameters = 1; //Can have more than one descriptor table
-    uRootSignatureDesc.pParameters = &rootParameterUniform; //Pointer to an array of descriptor tables if they are multiple of them.
+    uRootSignatureDesc.NumParameters = 2; //Can have more than one descriptor table
+    uRootSignatureDesc.pParameters = rootParams; //Pointer to an array of descriptor tables if they are multiple of them.
     uRootSignatureDesc.NumStaticSamplers = 0;
     uRootSignatureDesc.pStaticSamplers = nullptr;
     uRootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
@@ -304,8 +360,8 @@ int main(){
     simplePSODesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
     simplePSODesc.NodeMask = 0; //Remember just like the 'NodeMask' in the createrootsignature method, this is for multiGPU systems where we are using node masks to choose between GPUs.
     simplePSODesc.pRootSignature = uRootSignature.Get();
-    shader triangleShader("../shaders/simple.vert","../shaders/simple.pixel");
-    simpleShaderByteCode triangleByteCode = triangleShader.getShaderByteCode();
+    Shader triangleShader("../shaders/simple.vert","../shaders/simple.pixel");
+    SimpleShaderByteCode triangleByteCode = triangleShader.getShaderByteCode();
     simplePSODesc.VS = triangleByteCode.vsByteCode;
     simplePSODesc.PS = triangleByteCode.psByteCode;
     d3d12Device->CreateGraphicsPipelineState(&simplePSODesc, IID_PPV_ARGS(&simplePSO));
@@ -351,6 +407,36 @@ int main(){
     vbView.SizeInBytes = sizeof(triangle);
     vbView.StrideInBytes = sizeof(Vertex);
 
+    int textureWidth, textureHeight, nrChannels;
+    std::string texturePath = "C:/Users/broia/Downloads/practicetexture.png";
+    unsigned char* textureData = stbi_load(texturePath.c_str(), &textureWidth, &textureHeight, &nrChannels, 0);
+    if (textureData == nullptr)
+        std::cout<<"Texture data can't be opened in memory!";
+
+    //Let's do textures
+    Microsoft::WRL::ComPtr<ID3D12Resource> texture;
+    D3D12_CLEAR_VALUE textureClearValue = {};
+
+    D3D12_RESOURCE_DESC textureDesc = {};
+    textureDesc.SampleDesc.Count = 1;
+    textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    textureDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    textureDesc.Height = textureHeight;
+    textureDesc.Width = textureWidth;
+    textureDesc.DepthOrArraySize = 1;
+    textureDesc.MipLevels = 1;
+    textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE; //Since the flag doesn't state to allow depth/stencil or render target, we must set the clear value to nullptr
+
+    uploadHeapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+
+    hr = d3d12Device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE, &textureDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture));
+    if(FAILED(hr)){
+        std::cout<<"Texture resource commitment error!";
+        return -1;
+    }
+
     //Command queues will execute command lists and signal a fence.
     //Command allocator. A memory pool for where a commands will be placed for the GPU to read. Through a frame from the CPU side, each command is allocated through command lists in a command allocator. Commands are recorded to the command list, when a command list opens, it starts recording commands, and when the command list closes, it stops. So if we want multiple command lists in the command allocator, we must stop the recording of one list and then only move to another. So can only use the command allcoator with multiple command lists if they're all closed of course.
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> primaryCommandAllocator;
@@ -361,18 +447,57 @@ int main(){
         std::cout<<"Primary Command allocator creation failed!";
         return -1;
     }
+
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList10> triangleCommandList; //Everytime a commandlist is reset, it will allocate a block of memory from the commandallocator, it will pile up. We can reset the command allocator, but if we do so, then we shouldn't use the command list and execute it with the previously allocated memory.
     hr = d3d12Device->CreateCommandList(0,//Node mask, GPU(s)
                                         D3D12_COMMAND_LIST_TYPE_DIRECT,
                                         primaryCommandAllocator.Get(),
-                                        nullptr,//simplePSO.Get(),
+                                        simplePSO.Get(),
                                         IID_PPV_ARGS(&triangleCommandList));
     if(FAILED(hr)){
         std::cout<<"Triangle Command list creation failed!";
         return -1;
     }
-    triangleCommandList->Close(); //All command lists created by a d3d12 device is created in an open state, so closing it at first helps us do better error management and tracking.
 
+    D3D12_TEXTURE_COPY_LOCATION textureCopyLocation = {};
+    textureCopyLocation.pResource = texture.Get();
+    textureCopyLocation.SubresourceIndex = 0;
+    textureCopyLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
+    UINT numRows;
+    UINT64 rowSizeInBytes;
+    UINT64 totalBytes;
+    d3d12Device->GetCopyableFootprints(&textureDesc, 0, 1, 0, &footprint, &numRows, &rowSizeInBytes, &totalBytes);
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> intermeddiateBuffer;
+    uniformBufferDesc.Width = totalBytes;
+    uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
+    hr = d3d12Device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE, &uniformBufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&intermeddiateBuffer));
+    if(FAILED(hr)){
+        std::cout<<"Intermediate buffer for the texture upload failed";
+        return -1;
+    }
+
+    mappedData = nullptr;
+    intermeddiateBuffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+    unsigned char* destIB = static_cast<unsigned char*>(mappedData);
+    unsigned char* sourceT = textureData;
+    PrintDebugMessages();
+    //The thing is that D3D12 requires padding for texture data.
+    //Now, while the GPU doesn't know that this buffer has texture data, when we copy it, we are copying it in the form of the footprint we 'studied' from the textureDesc. So, D3D12, when copying, will copy the data, with the padding and everything necessary regarding the footprint. So we will need to pad the data while we do a memcpy to begin with.
+    //For 'padding', we're just leaving the data empty.
+    for (UINT row = 0; row < textureHeight; row++){
+        memcpy(destIB + (row * footprint.Footprint.RowPitch), sourceT + (row * textureWidth * nrChannels), textureWidth * nrChannels);
+    }
+    //memcpy(mappedData, textureData, totalBytes);
+    intermeddiateBuffer->Unmap(0, nullptr);
+
+    D3D12_TEXTURE_COPY_LOCATION intermediateCopyLocation = {};
+    intermediateCopyLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    intermediateCopyLocation.pResource = intermeddiateBuffer.Get();
+    intermediateCopyLocation.SubresourceIndex = 0;
+    intermediateCopyLocation.PlacedFootprint = footprint;
     //Synchronization. Why it's important. So the GPU and CPU are both working simulatenously, however, we don't want one to overtake the other, we don't want the CPU to overtake and change the PSO before the frame has been completed by the GPU and cause errors, and we don't want the GPU to start making frames before updating uniforms and stuff by the CPU.
     //A fence is one of the most simple synchronization objects. It exists in both the CPU and the GPU. It has an internal integer counter, and can trigger events on either the GPU or the GPU when the counter reached a certain value, that we can specify.
     //This can be done to trigger an event on the CPU when a command allocator's commands have been executed fully, or we can have the GPU wait while the CPu is completing a certain operation first, or we can get the command queues (if multiple exists), on the GPU to wait upon one another.
@@ -401,6 +526,52 @@ int main(){
     UINT frameIndex = 0; // What frame we are in.
     UINT fenceValue = 1;
 
+    D3D12_RESOURCE_BARRIER textureUploadBarrier = {};
+    textureUploadBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    textureUploadBarrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+    D3D12_RESOURCE_TRANSITION_BARRIER textureUploadTransitionBarrier = {};
+    textureUploadTransitionBarrier.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+    textureUploadTransitionBarrier.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    textureUploadTransitionBarrier.pResource = texture.Get();
+    textureUploadTransitionBarrier.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    textureUploadBarrier.Transition = textureUploadTransitionBarrier;
+    triangleCommandList->CopyTextureRegion(&textureCopyLocation, 0, 0, 0, &intermediateCopyLocation, nullptr);
+    triangleCommandList->ResourceBarrier(1, &textureUploadBarrier);
+    triangleCommandList->Close(); //All command lists created by a d3d12 device is created in an open state, so closing it at first helps us do better error management and tracking.
+    ID3D12CommandList* cLists[] = { triangleCommandList.Get() };
+    commandQueue->ExecuteCommandLists(_countof(cLists), cLists);
+
+    hr = commandQueue->Signal(fence.Get(), fenceValue); //Will tell the GPU after finishing all the currently queued commands, set the fence to the fence value. It will se the GPU fence value to the fence value variable provided through this method. Basically saying hey commandqueue, after you finish, at this address (given by the fence), put the value (given by fencevalue).
+    if(FAILED(hr)){
+        std::cout<<"Command queue signal failed before the rendering loop!";
+        return -1;
+    }
+    if (fence->GetCompletedValue() < fenceValue) { //If the value in the fence object is less than the 'fence value' variable, then that means that the command queue has not finished yet, as the command queue will set the value in the fence object to be fence value after finishing.
+        hr = fence->SetEventOnCompletion(fenceValue, fenceEvent); //Basically will say that if the fence's value is the value provided through the 'fencevalue' variable, then fenceevent should be "signaled". "Signaling" in this context means that the fence object will notify a event handle if that happens.
+        if(FAILED(hr)){
+            std::cout<<"Failed to set fence event on completion before the rendering loop!";
+            return -1;
+        }
+        WaitForSingleObject(fenceEvent, INFINITE); //Basically saying that the CPU thread should wait an 'INFINITE' amount of time until event has been signaled. The thread will do other things, and the reason we don't just run an infinite loop instead, checking and seeing if the fence value is reached or not, is because the thread will not be free for other tasks + the memory will keep being accessed over and over again, which may not be bad since cache, but it'll waste the other 64-8 bytes in the cache.
+    }
+    fenceValue++;
+    PrintDebugMessages();
+
+    D3D12_TEX2D_SRV texSRV = {};
+    texSRV.MipLevels = 1;
+    texSRV.MostDetailedMip = 0;
+    texSRV.PlaneSlice = 0;
+    texSRV.ResourceMinLODClamp = 0.0f;
+    D3D12_SHADER_RESOURCE_VIEW_DESC texView = {};
+    texView.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    texView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    texView.Texture2D = texSRV;
+    UINT srvDescriptorIncrementSize = d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE textureHandle = uniformHeap->GetCPUDescriptorHandleForHeapStart();
+    textureHandle.ptr = textureHandle.ptr + srvDescriptorIncrementSize;
+    d3d12Device->CreateShaderResourceView(texture.Get(), &texView, textureHandle);
+
     bool running = true;
     SDL_Event sdlEvent; //We want to log events for like quitting shit.
     if(!window){
@@ -427,10 +598,11 @@ int main(){
         //triangleCommandList->SetPipelineState(simplePSO.Get()); Don't need to do this because I have already set the pipeline state while resetting the command list.
         triangleCommandList->SetGraphicsRootSignature(uRootSignature.Get());
         // RTV heaps that we use for presenting to the screen, and not for rendering to a frame buffer or for re-use by the shader, do not need to be set with SetDescriptorHeaps, they are instead set by OMSetRenderTarget. If I wanted to reuse those render targets, then I should create a frame buffer and while creating the rtv in the RTVHeapDesc, I should have used the flag for ALLOW_RENDER_TARGET. Now I can re-use the same RTVs for both Framebuffer and for the swapchain, btu then the swapchain format would need to be the same as the RTV format, and we will lose lots of information with only 1 byte for each color channel.
-        ID3D12DescriptorHeap* dHeaps[] = { uniformHeap.Get() };
+        ID3D12DescriptorHeap* dHeaps[] = { uniformHeap.Get(), samplerHeap.Get() };
         triangleCommandList->SetDescriptorHeaps(_countof(dHeaps), dHeaps);
         triangleCommandList->SetGraphicsRootDescriptorTable(0, //Root parameter index, base register + index (b0, b1, and dependingly...) in the shader. If range says 5 descriptors, then it will basically start from that base register range and form the uniform heap pointer, and then allocate 5 consecutive descriptors.
                                                             uniformHeap->GetGPUDescriptorHandleForHeapStart());
+        triangleCommandList->SetGraphicsRootDescriptorTable(1, samplerHeap->GetGPUDescriptorHandleForHeapStart());
         //Each 'slot' in the root parameter can hold anyting from one descriptor to descriptor tables. Each descriptor table can have multiple ranges. Where a range describes a contiguous block of descriptors of same type. Set a certain table. So this binds the 0'th table to the descriptorhandlestart.. So however it has defined it.
         D3D12_VIEWPORT viewPort = {}; //Viewport defines where we want to render to in the swapchain or the render target, whatever we are rendering to. So if I have a viewport of 500x500 in a 1000x1000 window, it will only render to the other 500x500
         viewPort.TopLeftX = 0.0f; //Position of X on the left

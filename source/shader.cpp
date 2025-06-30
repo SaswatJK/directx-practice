@@ -2,7 +2,7 @@
 #include "D3D12/d3dcommon.h"
 #include <winerror.h>
 
-std::string shader::readShader(const std::string& shaderPath){
+std::string Shader::readShader(const std::string& shaderPath){
     std::ifstream file(shaderPath);
     if (!file.is_open()) {
         std::cout << "Shader file " << shaderPath << " cannot be opened!" << std::endl;
@@ -13,7 +13,7 @@ std::string shader::readShader(const std::string& shaderPath){
     );
 }
 
-shader::shader(const std::string& vsPath, const std::string& psPath){
+Shader::Shader(const std::string& vsPath, const std::string& psPath){
     std::string tempVS = readShader(vsPath);
     std::string tempPS = readShader(psPath);
     Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
@@ -50,8 +50,8 @@ shader::shader(const std::string& vsPath, const std::string& psPath){
     }
 }
 
-simpleShaderByteCode shader::getShaderByteCode(){
-    simpleShaderByteCode simpleByteCode;
+SimpleShaderByteCode Shader::getShaderByteCode(){
+    SimpleShaderByteCode simpleByteCode;
     simpleByteCode.vsByteCode.pShaderBytecode = vsBlob->GetBufferPointer();
     simpleByteCode.vsByteCode.BytecodeLength= vsBlob->GetBufferSize();
     simpleByteCode.psByteCode.pShaderBytecode = psBlob->GetBufferPointer();

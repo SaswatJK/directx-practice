@@ -1,3 +1,4 @@
+#pragma once
 #include <D3D12/D3dx12.h>
 #include <combaseapi.h>
 #include <cstring>
@@ -26,3 +27,4 @@
 #include "SDL3/SDL_events.h"
 #include "SDL3/SDL_oldnames.h"
 #include "SDL3/SDL_video.h"
+#include "stb_image.h"
