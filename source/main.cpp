@@ -38,11 +38,17 @@ int main(){
     SDL_Init(SDL_INIT_VIDEO);
     HRESULT hr;
     Microsoft::WRL::ComPtr<IDXGIFactory7> dxgiFactory; //Latest version of factory, can check feature support, preference of GPU, as well as warp works
-    hr = CreateDXGIFactory1(IID_PPV_ARGS(&dxgiFactory));
+    Microsoft::WRL::ComPtr<IDXGIFactory2> tempFactory;
+    hr = CreateDXGIFactory1(IID_PPV_ARGS(&tempFactory));
     if(FAILED(hr)){
         std::cerr<<"Can't create a factory for dxgi";
         return -1;
     }
+    tempFactory.As(&dxgiFactory);
+
+    BOOL allowTearing = FALSE;
+    dxgiFactory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing));
+    //std::cout<<"Skin tearing is: "<<allowTearing;
 
     Microsoft::WRL::ComPtr<ID3D12Debug> debugController;
     if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
@@ -76,6 +82,33 @@ int main(){
         return -1;
     }
 
+    D3D12_HEAP_PROPERTIES uploadHeapProperties = {};
+    uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD; //Type upload is the best for CPU read once and GPU write once Data. This type has CPU access optimized for uploading to the GPU, which is why it has a CPU virtual address, not just a GPU one. Resouurce on this Heap must be created with GENERIC_READ
+    uploadHeapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN; //I used WRITE_COMBINE enum but it gave me error, so I have to use PROPERTY_UNKOWN. The write comobine ignores the cache and writes to a buffer, it's better for streaming data to another device like the GPU, but very inefficient if we wanna read for some reason from the same buffer this is pointing to.
+    uploadHeapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN; //I used MEMORY_POOL_L0 but it gave me error, so I have to use POOL_UNKOWN. L0 means the system memory (RAM), while L1 is the videocard memory (VRAM). If integrated graphics exists, this will be slower for the GPU but the CPU will be faster than the GPU. However it does still support APUs and Integrated Graphics, while if we use L1, it's only available for systems with their own graphics cards. It cannot be accessed by the CPU at all, so it's only GPU accessed.
+    //I think I read somehwere that the reason I got error was due to redundancy? I will check later
+    uploadHeapProperties.CreationNodeMask = 1;
+    uploadHeapProperties.VisibleNodeMask = 1;
+
+    D3D12_HEAP_PROPERTIES defaultHeapProperties = {};
+    defaultHeapProperties.Type = D3D12_HEAP_TYPE_DEFAULT; //Default type is the best for GPU reads and writes, it's not accessible by the CPU.
+    defaultHeapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN; //It is actually not readable from the CPU. We say unkown because we are using a non custom type.
+    defaultHeapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN; //Actully L1 but since non custom type.
+    defaultHeapProperties.CreationNodeMask = 1;
+    defaultHeapProperties.VisibleNodeMask = 1;
+
+    Microsoft::WRL::ComPtr<ID3D12Heap1> uploadHeap;
+    D3D12_HEAP_DESC uploadHeapDesc;
+    uploadHeapDesc.Properties = uploadHeapProperties;
+    uploadHeapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT; //64 KB.
+    uploadHeapDesc.SizeInBytes = 4194300; //65536 for buffer alignments.. Now, we start constant buffer and vertex buffer in those, so they take up 65536, then for the texture, we have the 4095904 bytes, but since it's still a buffer, we need to start it from 65536 byte offset. So that + 655536 = some bytes, and we add extra bytes jsut so that it's a multiple of 64KB.
+    uploadHeapDesc.Flags = D3D12_HEAP_FLAG_NONE;
+
+    hr = d3d12Device->CreateHeap(&uploadHeapDesc, IID_PPV_ARGS(&uploadHeap));
+    if(FAILED(hr)){
+        std::cout<<"Upload heap creation has failed!";
+        return -1;
+    }
     Microsoft::WRL::ComPtr<IDXGISwapChain4> swapChain;
     Microsoft::WRL::ComPtr<IDXGISwapChain1> tempSwapChain; //For compatibility reasons as the createswapchainforhwnd method only takes in swapchain1
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
@@ -89,6 +122,7 @@ int main(){
     swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED; //Haven't thought of it
     swapChainDesc.SampleDesc = swapSampleDesc;
+    swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
     hr = dxgiFactory->CreateSwapChainForHwnd(
         commandQueue.Get(),
         hwnd,
@@ -113,51 +147,55 @@ int main(){
     float color[4] = { 1.0f, 0.5f, 0.5f, 1.0f };
     float metallic[4] = { 1.0f, 0.2f, 0.0f, 1.0f };
 
-    D3D12_HEAP_PROPERTIES uploadHeapProperties = {};
-    uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD; //Type upload is the best for CPU read once and GPU write once Data. This type has CPU access optimized for uploading to the GPU, which is why it has a CPU virtual address, not just a GPU one. Resouurce on this Heap must be created with GENERIC_READ
-    uploadHeapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN; //I used WRITE_COMBINE enum but it gave me error, so I have to use PROPERTY_UNKOWN. The write comobine ignores the cache and writes to a buffer, it's better for streaming data to another device like the GPU, but very inefficient if we wanna read for some reason from the same buffer this is pointing to.
-    uploadHeapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN; //I used MEMORY_POOL_L0 but it gave me error, so I have to use POOL_UNKOWN. L0 means the system memory (RAM), while L1 is the videocard memory (VRAM). If integrated graphics exists, this will be slower for the GPU but the CPU will be faster than the GPU. However it does still support APUs and Integrated Graphics, while if we use L1, it's only available for systems with their own graphics cards. It cannot be accessed by the CPU at all, so it's only GPU accessed.
-    //I think I read somehwere that the reason I got error was due to redundancy? I will check later
-    uploadHeapProperties.CreationNodeMask = 1;
-    uploadHeapProperties.VisibleNodeMask = 1;
+    Vertex triangle[3] = {
+        {{0.0f, 0.5f, -0.5f}},
+        {{0.5f, -0.5f, 0.5f}},
+        {{-0.5, -0.5f, 0.0f}}
+    };
 
     // Committed resource is the easiest way to create resource since we don't need to do heap management ourselves.
     //I wanted to use ID3D12Resource2 but it's so unimportant that these guys didn't even document it properly, there's no links to new features or to the old interface it has inherited from LMFAO
     Microsoft::WRL::ComPtr<ID3D12Resource> uniformBuffer;
-    D3D12_RESOURCE_DESC uniformBufferDesc = {};
-    DXGI_SAMPLE_DESC uniformBufferSampleDesc = {}; //Multisampling, mandatory to fill even for resources that don't make sense
-    uniformBufferSampleDesc.Count = 1;
-    uniformBufferSampleDesc.Quality = 0;
-    uniformBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; //Buffer resource, and not a texture resource
-    uniformBufferDesc.Alignment = 0;
-    uniformBufferDesc.Width = 256;
-    uniformBufferDesc.Height = 1;
-    uniformBufferDesc.DepthOrArraySize = 1;
-    uniformBufferDesc.MipLevels = 1;
-    uniformBufferDesc.Format = DXGI_FORMAT_UNKNOWN; //Buffers are basically typeless
-    uniformBufferDesc.SampleDesc = uniformBufferSampleDesc;
-    uniformBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    uniformBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    D3D12_RESOURCE_DESC primaryBufferDesc = {};
+    DXGI_SAMPLE_DESC primaryBufferSampleDesc = {}; //Multisampling, mandatory to fill even for resources that don't make sense
+    primaryBufferSampleDesc.Count = 1;
+    primaryBufferSampleDesc.Quality = 0;
+    primaryBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; //Buffer resource, and not a texture resource
+    primaryBufferDesc.Alignment = 0;
+    primaryBufferDesc.Width = 256 + sizeof(triangle);
+    primaryBufferDesc.Height = 1;
+    primaryBufferDesc.DepthOrArraySize = 1;
+    primaryBufferDesc.MipLevels = 1;
+    primaryBufferDesc.Format = DXGI_FORMAT_UNKNOWN; //Buffers are basically typeless
+    primaryBufferDesc.SampleDesc = primaryBufferSampleDesc;
+    primaryBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    primaryBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
     //CreateComittedResource2 can also be used, it makes it easier to do memory management as it will handle the heapAllocation itself, however that means only one resource per heap, and no custom heap layouts. Now, while I have not used custom heap layouts till now, I think I don't want more abstracted things while learning.
-    //CreateCommittedResourece3 uses layout rather than states for barriers and stuff, which should give more control for the memory of both GPU, CPU, and the access of either/or memory from either/or physical hardware (host or device)
-    hr = d3d12Device->CreateCommittedResource(
-        &uploadHeapProperties,
-        D3D12_HEAP_FLAG_NONE, //Can also use the ALLOW_ONLY_BUFFERS flag for better debug in the future,
-        &uniformBufferDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Your application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
-        nullptr, //For a texture or something or render target, can put a clear value here, for efficient clearing basically, we can use other ways to do it too,
-        IID_PPV_ARGS(&uniformBuffer));
+    //CreateCommittedResourece3 uses layout rather than states for barriers and stuff, which should give more control for the memory of both GPU, CPU, and the access of either/or memory from either/or physical hardware (host or device), so does createPlacedResource2, while CreatePlacedResource1 looks for desc_1 rather than desc for resources.
+    UINT64 bufferOffset = 0;
+    hr = d3d12Device->CreatePlacedResource(uploadHeap.Get(), bufferOffset, &primaryBufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Your application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
+
+                                           , nullptr, IID_PPV_ARGS(&uniformBuffer));
     if(FAILED(hr)){
-        std::cerr<<"Uniform resource comittment failrue!";
+        std::cout<<"Could not place the Vertex Buffer Resource";
+        PrintDebugMessages();
         return -1;
     }
 
+
+
+    UINT64 constantBufferOffset = 0;
     //Map the data from the host RAM to the GPU VRAM
     //What map does is, it gives a cpu accessible pointer to the GPU memory. Gets a GPU pointer to the specified subresource in the resource, but may not disclose the pointer value to applications. Map also invalidates the CPU cache, when necessary, so that CPU reads to this address reflect any modifications made by the GPU.
     UINT8* mappedData = nullptr;
-    uniformBuffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+    uniformBuffer->Map(0,//Index number of the subresource
+                      nullptr,//Nullptr as read range means that the entire subreousrce might be read by the CPU, or else we can use a d3d12_range struct that describes the range of memory to access. We use non nullptr for read-range only if we want to update partially a large buffer, or read existing vertex and modify it.
+                      reinterpret_cast<void**>(&mappedData));
+    //After the map operation, a GPU pointer is given.
+    //Why not use GetGPUVirtualAddress() method instead of Map? Because the CPU cannot understand the GPUVirtualAddress.
     memcpy(mappedData, &color, 16);
     memcpy(mappedData + 16, &metallic, 16);
+    memcpy(mappedData+256, &triangle, sizeof(triangle));
     uniformBuffer->Unmap(0, nullptr);
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> uniformHeap;
@@ -181,6 +219,11 @@ int main(){
         //Simplest way to say it, we are getting the location of the first descriptor of many (if there are more than 1), in the descriptor heap. Right now it's the start of the descriptor heap, now imagine we wanted another descriptor of the same type in the heap, to create the 'view', we would have to increment this handle to the next descriptor 'slot' in the descriptor heap. When we call functions like CreateShaderResourceView or CreateConstantBufferView, we pass a CPU descriptor handle to specify exactly where in the heap the new descriptor should be written. Later, when binding descriptors to the GPU pipeline, we use GPU descriptor handles to tell the GPU where to find these descriptors during execution.
         //It's because the descriptor heap is in the CPU accessible memory while what it's ponting to is in the GPU, which is why descriptors/views use gpuvirtualaddress for pointing to a buffer that is committed to the GPU memory, but we use cpuhandle for the memory for the descriptors themselves.
     );
+
+    D3D12_VERTEX_BUFFER_VIEW vbView = {};
+    vbView.BufferLocation = uniformBuffer->GetGPUVirtualAddress() + 256;
+    vbView.SizeInBytes = sizeof(triangle);
+    vbView.StrideInBytes = sizeof(Vertex);
 
     //For future reference: We can have the same heap create multiple descriptor tables, which have contiguous slices of the same heap, this is useful if we want to upload resource once in bulk and use them in slice, in this case, descriptor tables are useful. Now we create a descriptor table and get the starting address from the GPU location of the descriptor heap and add offset of where we want to start the slice from, then we use descriptor range struct to define the numbers of descriptor and everything we want to include in that slice/table
 
@@ -366,47 +409,6 @@ int main(){
     simplePSODesc.PS = triangleByteCode.psByteCode;
     d3d12Device->CreateGraphicsPipelineState(&simplePSODesc, IID_PPV_ARGS(&simplePSO));
 
-    Vertex triangle[3] = {
-        {{0.0f, 0.5f, -0.5f}},
-        {{0.5f, -0.5f, 0.5f}},
-        {{-0.5, -0.5f, 0.0f}}
-    };
-
-    Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer;
-    D3D12_RESOURCE_DESC vertexBufferDesc = {};
-    DXGI_SAMPLE_DESC vertexBufferSampleDesc = {}; //Multisampling
-    vertexBufferSampleDesc.Count = 1;
-    vertexBufferSampleDesc.Quality = 0;
-    vertexBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; //Buffer resource, and not a texture resource
-    vertexBufferDesc.Alignment = 0;
-    vertexBufferDesc.Width = sizeof(triangle);
-    vertexBufferDesc.Height = 1;
-    vertexBufferDesc.DepthOrArraySize = 1;
-    vertexBufferDesc.MipLevels = 1;
-    vertexBufferDesc.Format = DXGI_FORMAT_UNKNOWN; //Buffers are basically typeless
-    vertexBufferDesc.SampleDesc = vertexBufferSampleDesc;
-    vertexBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    vertexBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-    hr = d3d12Device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE, &vertexBufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&vertexBuffer));
-    if(FAILED(hr)){
-        std::cout<<"Could not commit the Vertex Buffer Resource";
-        return -1;
-    }
-
-    mappedData = nullptr;
-    vertexBuffer->Map(0,//Index number of the subresource
-                      nullptr,//Nullptr as read range means that the entire subreousrce might be read by the CPU, or else we can use a d3d12_range struct that describes the range of memory to access. We use non nullptr for read-range only if we want to update partially a large buffer, or read existing vertex and modify it.
-                      reinterpret_cast<void**>(&mappedData));
-    //After the map operation, a GPU pointer is given.
-    //Why not use GetGPUVirtualAddress() method instead of Map? Because the CPU cannot understand the GPUVirtualAddress.
-    memcpy(mappedData, &triangle, sizeof(triangle));
-    vertexBuffer->Unmap(0, nullptr);
-    D3D12_VERTEX_BUFFER_VIEW vbView = {};
-    vbView.BufferLocation = vertexBuffer->GetGPUVirtualAddress();
-    vbView.SizeInBytes = sizeof(triangle);
-    vbView.StrideInBytes = sizeof(Vertex);
-
     int textureWidth, textureHeight, nrChannels;
     std::string texturePath = "C:/Users/broia/Downloads/practicetexture.png";
     unsigned char* textureData = stbi_load(texturePath.c_str(), &textureWidth, &textureHeight, &nrChannels, 0);
@@ -429,11 +431,27 @@ int main(){
     textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE; //Since the flag doesn't state to allow depth/stencil or render target, we must set the clear value to nullptr
 
-    uploadHeapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_ALLOCATION_INFO allocInfo = d3d12Device->GetResourceAllocationInfo(0, 1, &textureDesc);
+    UINT64 textureDHSize = allocInfo.SizeInBytes;
 
-    hr = d3d12Device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE, &textureDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture));
+    Microsoft::WRL::ComPtr<ID3D12Heap1> defaultHeap;
+    D3D12_HEAP_DESC defaultHeapDesc;
+    defaultHeapDesc.Properties = defaultHeapProperties;
+    defaultHeapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT; //64 KB.
+    defaultHeapDesc.SizeInBytes = textureDHSize; //Just enough with alignment for the texture.
+    defaultHeapDesc.Flags = D3D12_HEAP_FLAG_NONE;
+
+    hr = d3d12Device->CreateHeap(&defaultHeapDesc, IID_PPV_ARGS(&defaultHeap));
+    if(FAILED(hr)){
+        std::cout<<"Default heap creation has failed!";
+        return -1;
+    }
+
+    //hr = d3d12Device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &textureDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture));
+    hr = d3d12Device->CreatePlacedResource(defaultHeap.Get(), 0, &textureDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture));
     if(FAILED(hr)){
         std::cout<<"Texture resource commitment error!";
+        PrintDebugMessages();
         return -1;
     }
 
@@ -471,11 +489,11 @@ int main(){
     d3d12Device->GetCopyableFootprints(&textureDesc, 0, 1, 0, &footprint, &numRows, &rowSizeInBytes, &totalBytes);
 
     Microsoft::WRL::ComPtr<ID3D12Resource> intermeddiateBuffer;
-    uniformBufferDesc.Width = totalBytes;
-    uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
-    hr = d3d12Device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE, &uniformBufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&intermeddiateBuffer));
+    primaryBufferDesc.Width = totalBytes;
+    UINT64 textureBufferOffset = 65536;
+    hr = d3d12Device->CreatePlacedResource(uploadHeap.Get(), textureBufferOffset, &primaryBufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&intermeddiateBuffer));
     if(FAILED(hr)){
-        std::cout<<"Intermediate buffer for the texture upload failed";
+        std::cout<<"Intermediate buffer for the texture upload failed to allocate!";
         return -1;
     }
 
@@ -659,7 +677,7 @@ int main(){
         ID3D12CommandList* cLists[] = { triangleCommandList.Get() };
         commandQueue->ExecuteCommandLists(_countof(cLists), cLists);
 
-        hr = swapChain->Present(1, 0);
+        hr = swapChain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
         if(FAILED(hr)){
             std::cout<<"Swapchain present failed!";
             return -1;

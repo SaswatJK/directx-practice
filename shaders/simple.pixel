@@ -11,7 +11,7 @@ Texture2D myTexture : register(t0);
 SamplerState mySampler : register(s0);
 
 float4 PSMain(PSInput input) : SV_TARGET {
-    float2 dummyUV = float2(0.5, 0.5); // Sample from the center
+    float2 dummyUV = float2(0.5, 0.8); // Sample from the center
     float4 finalColor = color + metallic;
     finalColor = myTexture.Sample(mySampler, dummyUV);
     return finalColor;
