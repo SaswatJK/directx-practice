@@ -170,19 +170,17 @@ int main(){
     primaryBufferDesc.SampleDesc = primaryBufferSampleDesc;
     primaryBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     primaryBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-    //CreateComittedResource2 can also be used, it makes it easier to do memory management as it will handle the heapAllocation itself, however that means only one resource per heap, and no custom heap layouts. Now, while I have not used custom heap layouts till now, I think I don't want more abstracted things while learning.
-    //CreateCommittedResourece3 uses layout rather than states for barriers and stuff, which should give more control for the memory of both GPU, CPU, and the access of either/or memory from either/or physical hardware (host or device), so does createPlacedResource2, while CreatePlacedResource1 looks for desc_1 rather than desc for resources.
+    //CreateCommittedResource2 can also be used, it makes it easier to do memory management as it will handle the heapAllocation itself, however that means only one resource per heap, and no custom heap layouts. Now, while I have not used custom heap layouts till now, I think I don't want more abstracted things while learning.
+    //CreateCommittedResource3 uses layout rather than states for barriers and stuff, which should give more control for the memory of both GPU, CPU, and the access of either/or memory from either/or physical hardware (host or device), so does CreatePlacedResource2, while CreatePlacedResource1 looks for desc_1 rather than desc for resources.
     UINT64 bufferOffset = 0;
-    hr = d3d12Device->CreatePlacedResource(uploadHeap.Get(), bufferOffset, &primaryBufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Your application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
-
-                                           , nullptr, IID_PPV_ARGS(&uniformBuffer));
+    hr = d3d12Device->CreatePlacedResource(uploadHeap.Get(), bufferOffset, &primaryBufferDesc,
+                                           D3D12_RESOURCE_STATE_GENERIC_READ, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Your application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
+                                           nullptr, IID_PPV_ARGS(&uniformBuffer));
     if(FAILED(hr)){
         std::cout<<"Could not place the Vertex Buffer Resource";
         PrintDebugMessages();
         return -1;
     }
-
-
 
     UINT64 constantBufferOffset = 0;
     //Map the data from the host RAM to the GPU VRAM
@@ -200,7 +198,7 @@ int main(){
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> uniformHeap;
     D3D12_DESCRIPTOR_HEAP_DESC uniformHeapDesc = {};
-    uniformHeapDesc.NumDescriptors = 2;
+    uniformHeapDesc.NumDescriptors = 3;
     uniformHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     uniformHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     D3D12_CPU_DESCRIPTOR_HANDLE descHandle = {};
@@ -227,10 +225,10 @@ int main(){
 
     //For future reference: We can have the same heap create multiple descriptor tables, which have contiguous slices of the same heap, this is useful if we want to upload resource once in bulk and use them in slice, in this case, descriptor tables are useful. Now we create a descriptor table and get the starting address from the GPU location of the descriptor heap and add offset of where we want to start the slice from, then we use descriptor range struct to define the numbers of descriptor and everything we want to include in that slice/table
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> backbufferRTs[2];
+    Microsoft::WRL::ComPtr<ID3D12Resource> backbufferRTs[3];
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> backBufferRTVHeap;
     D3D12_DESCRIPTOR_HEAP_DESC backBufferRTVHeapDesc = {};
-    backBufferRTVHeapDesc.NumDescriptors = 2;
+    backBufferRTVHeapDesc.NumDescriptors = 3;
     backBufferRTVHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     backBufferRTVHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     hr = d3d12Device->CreateDescriptorHeap(&backBufferRTVHeapDesc, IID_PPV_ARGS(&backBufferRTVHeap));
@@ -248,6 +246,18 @@ int main(){
             bbRTVHandle);
         bbRTVHandle.ptr = bbRTVHandle.ptr + rtvDescriptorIncrementSize;
     }
+
+    D3D12_RESOURCE_DESC gBufferDesc = {};
+    gBufferDesc.SampleDesc.Count = 1;
+    gBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    gBufferDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    gBufferDesc.Height = windowHeight;
+    gBufferDesc.Width = windowWidth;
+    gBufferDesc.DepthOrArraySize = 1;
+    gBufferDesc.MipLevels = 1;
+    gBufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    gBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    gBufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
     //We create a samper, the thing with samplers is that they only need to be described and we only create a sampler resource view, and a sampler heap.
     D3D12_DESCRIPTOR_HEAP_DESC samplerHeapDesc = {};
@@ -283,7 +293,7 @@ int main(){
     uniformRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
     D3D12_DESCRIPTOR_RANGE textureRange = {};
-    textureRange.NumDescriptors = 1;
+    textureRange.NumDescriptors = 2;
     textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     textureRange.RegisterSpace = 0;
     textureRange.BaseShaderRegister = 0;
@@ -433,12 +443,14 @@ int main(){
 
     D3D12_RESOURCE_ALLOCATION_INFO allocInfo = d3d12Device->GetResourceAllocationInfo(0, 1, &textureDesc);
     UINT64 textureDHSize = allocInfo.SizeInBytes;
+    allocInfo = d3d12Device->GetResourceAllocationInfo(0, 1, &gBufferDesc);
+    UINT64 gBufferDHSize = allocInfo.SizeInBytes;
 
     Microsoft::WRL::ComPtr<ID3D12Heap1> defaultHeap;
     D3D12_HEAP_DESC defaultHeapDesc;
     defaultHeapDesc.Properties = defaultHeapProperties;
     defaultHeapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT; //64 KB.
-    defaultHeapDesc.SizeInBytes = textureDHSize; //Just enough with alignment for the texture.
+    defaultHeapDesc.SizeInBytes = textureDHSize + gBufferDHSize; //Just enough with alignment for the uploaded texture and the gbuffer.
     defaultHeapDesc.Flags = D3D12_HEAP_FLAG_NONE;
 
     hr = d3d12Device->CreateHeap(&defaultHeapDesc, IID_PPV_ARGS(&defaultHeap));
@@ -447,13 +459,31 @@ int main(){
         return -1;
     }
 
-    //hr = d3d12Device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &textureDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture));
-    hr = d3d12Device->CreatePlacedResource(defaultHeap.Get(), 0, &textureDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture));
+    hr = d3d12Device->CreatePlacedResource(defaultHeap.Get(), 0, &gBufferDesc, D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&backbufferRTs[2]));
     if(FAILED(hr)){
-        std::cout<<"Texture resource commitment error!";
+        std::cout<<"G buffer placement error!";
         PrintDebugMessages();
         return -1;
     }
+
+    D3D12_TEX2D_RTV gBufferRTV = {};
+    gBufferRTV.MipSlice = 0;
+    gBufferRTV.PlaneSlice = 0;
+
+    D3D12_RENDER_TARGET_VIEW_DESC gBufferViewDesc = {};
+    gBufferViewDesc.Texture2D = gBufferRTV;
+    gBufferViewDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    gBufferViewDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+
+
+    hr = d3d12Device->CreatePlacedResource(defaultHeap.Get(), gBufferDHSize, &textureDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture));
+    if(FAILED(hr)){
+        std::cout<<"Texture resource placement error!";
+        return -1;
+    }
+
+    d3d12Device->CreateRenderTargetView(backbufferRTs[2].Get(), &gBufferViewDesc, bbRTVHandle);
+
 
     //Command queues will execute command lists and signal a fence.
     //Command allocator. A memory pool for where a commands will be placed for the GPU to read. Through a frame from the CPU side, each command is allocated through command lists in a command allocator. Commands are recorded to the command list, when a command list opens, it starts recording commands, and when the command list closes, it stops. So if we want multiple command lists in the command allocator, we must stop the recording of one list and then only move to another. So can only use the command allcoator with multiple command lists if they're all closed of course.
@@ -588,6 +618,9 @@ int main(){
     UINT srvDescriptorIncrementSize = d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     D3D12_CPU_DESCRIPTOR_HANDLE textureHandle = uniformHeap->GetCPUDescriptorHandleForHeapStart();
     textureHandle.ptr = textureHandle.ptr + srvDescriptorIncrementSize;
+    d3d12Device->CreateShaderResourceView(backbufferRTs[2].Get(), &texView, textureHandle);
+    textureHandle.ptr = textureHandle.ptr + srvDescriptorIncrementSize;
+    texView.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     d3d12Device->CreateShaderResourceView(texture.Get(), &texView, textureHandle);
 
     bool running = true;
@@ -650,7 +683,7 @@ int main(){
         triangleCommandList->ResourceBarrier(1, &bbBarrierRender); //A resource barrier is a command you insert into a command list to inform the GPU driver that a resource (like a texture or buffer) is about to be used in a different way than before. This helps the GPU synchronize access to that resource and avoid hazards such as reading while writing or using stale data.
         // To make it easier for me to undrstand it, I decided to name these heaps after what I am using it for, for example rtv heap is changed to backbufferrtv heap, but that should be changed because this rtv heap can be used for other rtvs and not just the back buffer.
         bbRTVHandle = backBufferRTVHeap->GetCPUDescriptorHandleForHeapStart(); //First back buffer RTV.
-        bbRTVHandle.ptr += frameIndex * rtvDescriptorIncrementSize;
+        bbRTVHandle.ptr += 2 * rtvDescriptorIncrementSize;
         const float clearColor[4] = { 0.0f, 1.0f, 0.0f, 1.0f };
         triangleCommandList->ClearRenderTargetView(bbRTVHandle, clearColor,
                                                    0, //Number of rects to clear
