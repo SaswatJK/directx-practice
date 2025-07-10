@@ -1,0 +1,12 @@
+struct PSInput{
+    float4 position : SV_POSITION;
+    float2 texcoord : TEXCOORD0;
+};
+
+Texture2D myTexture : register(t0);
+SamplerState mySampler : register(s0);
+
+float4 PSMain(PSInput input) : SV_TARGET {
+    float4 finalColor = myTexture.Sample(mySampler, input.texcoord);
+    return finalColor;
+}

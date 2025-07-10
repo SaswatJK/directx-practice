@@ -2,6 +2,7 @@
 #include "../include/shader.h"
 #include "D3D12/d3d12.h"
 #include "D3D12/d3dx12_core.h"
+#include "D3D12/dxgiformat.h"
 #include <combaseapi.h>
 #include <intsafe.h>
 #include <malloc.h>
@@ -153,6 +154,18 @@ int main(){
         {{-0.5, -0.5f, 0.0f}}
     };
 
+    Vertex quad[4] = {
+        {{-1.0f, -1.0f, 0.0f}}, //bottom left
+        {{-1.0f, 1.0f, 0.0f}}, //Top left
+        {{1.0f, 1.0f, 0.0f}}, //Top right
+        {{1.0f, -1.0f, 0.0f}} //Bottom right
+    };
+
+    unsigned int quadIndices[6] = {
+        0, 1, 2, //top left triangle
+        2, 3, 0 //bottom right triangle
+    };
+
     // Committed resource is the easiest way to create resource since we don't need to do heap management ourselves.
     //I wanted to use ID3D12Resource2 but it's so unimportant that these guys didn't even document it properly, there's no links to new features or to the old interface it has inherited from LMFAO
     Microsoft::WRL::ComPtr<ID3D12Resource> uniformBuffer;
@@ -162,7 +175,7 @@ int main(){
     primaryBufferSampleDesc.Quality = 0;
     primaryBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; //Buffer resource, and not a texture resource
     primaryBufferDesc.Alignment = 0;
-    primaryBufferDesc.Width = 256 + sizeof(triangle);
+    primaryBufferDesc.Width = 256 + sizeof(triangle) + sizeof(quad) + sizeof(quadIndices);
     primaryBufferDesc.Height = 1;
     primaryBufferDesc.DepthOrArraySize = 1;
     primaryBufferDesc.MipLevels = 1;
@@ -193,7 +206,9 @@ int main(){
     //Why not use GetGPUVirtualAddress() method instead of Map? Because the CPU cannot understand the GPUVirtualAddress.
     memcpy(mappedData, &color, 16);
     memcpy(mappedData + 16, &metallic, 16);
-    memcpy(mappedData+256, &triangle, sizeof(triangle));
+    memcpy(mappedData + 256, &triangle, sizeof(triangle));
+    memcpy(mappedData + 256 + sizeof(triangle), &quad, sizeof(quad));
+    memcpy(mappedData + 256 + sizeof(triangle) + sizeof(quad), &quadIndices, sizeof(quadIndices));
     uniformBuffer->Unmap(0, nullptr);
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> uniformHeap;
@@ -218,10 +233,20 @@ int main(){
         //It's because the descriptor heap is in the CPU accessible memory while what it's ponting to is in the GPU, which is why descriptors/views use gpuvirtualaddress for pointing to a buffer that is committed to the GPU memory, but we use cpuhandle for the memory for the descriptors themselves.
     );
 
-    D3D12_VERTEX_BUFFER_VIEW vbView = {};
-    vbView.BufferLocation = uniformBuffer->GetGPUVirtualAddress() + 256;
-    vbView.SizeInBytes = sizeof(triangle);
-    vbView.StrideInBytes = sizeof(Vertex);
+    D3D12_VERTEX_BUFFER_VIEW triangleVBView = {};
+    triangleVBView.SizeInBytes = sizeof(triangle);
+    triangleVBView.BufferLocation = uniformBuffer->GetGPUVirtualAddress() + 256;
+    triangleVBView.StrideInBytes = sizeof(Vertex);
+
+    D3D12_VERTEX_BUFFER_VIEW quadVBView = {};
+    triangleVBView.SizeInBytes = sizeof(quad);
+    triangleVBView.BufferLocation = uniformBuffer->GetGPUVirtualAddress() + 256 + sizeof(triangle);
+    triangleVBView.StrideInBytes = sizeof(Vertex);
+
+    D3D12_INDEX_BUFFER_VIEW quadIBView = {};
+    quadIBView.SizeInBytes = sizeof(quadIndices);
+    quadIBView.BufferLocation = uniformBuffer->GetGPUVirtualAddress() + 256 + sizeof(triangle) + sizeof(quad);
+    quadIBView.Format = DXGI_FORMAT_R32_UINT;
 
     //For future reference: We can have the same heap create multiple descriptor tables, which have contiguous slices of the same heap, this is useful if we want to upload resource once in bulk and use them in slice, in this case, descriptor tables are useful. Now we create a descriptor table and get the starting address from the GPU location of the descriptor heap and add offset of where we want to start the slice from, then we use descriptor range struct to define the numbers of descriptor and everything we want to include in that slice/table
 
@@ -255,7 +280,7 @@ int main(){
     gBufferDesc.Width = windowWidth;
     gBufferDesc.DepthOrArraySize = 1;
     gBufferDesc.MipLevels = 1;
-    gBufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    gBufferDesc.Format = DXGI_FORMAT_R16G16B16A16_UNORM;
     gBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     gBufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
@@ -354,10 +379,10 @@ int main(){
     //Reminder for the future. I dont' need to make a root signature for index or vertex buffers. I only need to copy it into GPU memory, through memcpy and mapping to get the pointer to the GPU memory, and I need to call IASetVertexBuffers, IASetIndexBuffer for it. So just make a d3d12 resource, map cpu resource to it, then call the function! I have to initailize the resource through resource_desc ofcourse, but it's not as crazy as the SRV or CBV ones.
 
     //Pipeline state objects should be created upfront. They should be created at the start with all the possible rasterisation descriptions and the shader combinations. And use that to compile all the shader before hand. After that, they should be switched between scenes, rather than making a new PSO everytime we need it. This is where the 'precompilation' of shaders that are so common nowadays, comes in. So for better readability and managibility, define the other piepilne state structs first that should be common among all the pipeline states, like the rasterizer's properties. Then the shader's names shoudl reflect what it does and then be used for different pipeline states with their own names. Remember that PSO is the main hickup when it comes to game engines nowadays and the frametime spike that occurs.
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> simplePSO;
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC simplePSODesc = {};
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> firstpassPSO;
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC firstpassPSODesc = {};
     //Will be using the same dxgi_sample_desc that I created for swap chain.
-    simplePSODesc.SampleDesc = swapSampleDesc;
+    firstpassPSODesc.SampleDesc = swapSampleDesc;
     //We will not be filling in StreamOutput or STREAM_OUTPUT_DESC because it's an output description for vertex shader output to a buffer, which is different from a FBO, where the fragment/pixel shader writes to a buffer.
     //D3D12_STREAM_OUTPUT_DESC streamOutputDesc = {}; I won't have a stream output, so I don't need to fill this
     D3D12_BLEND_DESC opaqueBlendDesc = {}; //Blending is done between background, and 'foreground' objects.
@@ -375,10 +400,10 @@ int main(){
     opaqueBlendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
     opaqueBlendDesc.RenderTarget[0].LogicOp = D3D12_LOGIC_OP_NOOP; //Operation to do while we writing to the render target.
     opaqueBlendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL; //Identifies which components of each pixel of a render target are writeable during blending. This allows for some whacky shaders if we only blend certain color channels. We can also just combine them iirc.
-    simplePSODesc.BlendState = opaqueBlendDesc;
+    firstpassPSODesc.BlendState = opaqueBlendDesc;
     D3D12_RASTERIZER_DESC simpleRasterizerDesc = {};
     simpleRasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID;
-    simpleRasterizerDesc.CullMode = D3D12_CULL_MODE_BACK; //Do not draw triangles that are front facing.
+    simpleRasterizerDesc.CullMode = D3D12_CULL_MODE_BACK; //Do not draw triangles that are back facing.
     simpleRasterizerDesc.FrontCounterClockwise = FALSE; // Determines if a triangle is front- or back-facing. If this member is TRUE, a triangle will be considered front-facing if its vertices are counter-clockwise on the render target and considered back-facing if they are clockwise. If this parameter is FALSE, the opposite is true.
     simpleRasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;//Remeber that we have a depth bias that we use for shadow mapping?
     simpleRasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
@@ -390,8 +415,8 @@ int main(){
     simpleRasterizerDesc.ForcedSampleCount = 0; //Sample count that is forced while UAV rendering. UAV is basically unordered access view, meaning the 'view' can be accesssed in any order, read write, write read write, write read write read etc. If we are to do UAV stuff, like reading and writing to the same texture/buffer concurrently, we can set it over 0, this means the rasterizer acts as if multiple samples exist. So, the GPU processes multiple samples per pixel. It's like doing manual super sampling.
     simpleRasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF; //Read the GPU Gems algorithm on conservative rasterization. It's absolutely beautiful. Basically making shit fatter for better inteserction tests.
     //D3D12_DEPTH_STENCIL_DESC dsDesc = {}; Not usign thise because we're not doign depth or stencil testing.
-    D3D12_INPUT_LAYOUT_DESC simpleInputLayoutDesc = {};
-    D3D12_INPUT_ELEMENT_DESC simpleInputElementDesc[] = {
+    D3D12_INPUT_LAYOUT_DESC firstpassInputLayoutDesc = {};
+    D3D12_INPUT_ELEMENT_DESC firstpassInputElementDesc[] = {
     "POSITION", //Semantic Name
     0, //Semantic index
     DXGI_FORMAT_R32G32B32_FLOAT, //format of the input, since we're using 4 byte floats in the CPU, we might as well use that in the GPU.
@@ -400,24 +425,55 @@ int main(){
     D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, //A value that identifies the input data class for a single input slot.
     0 //The number of instances to draw using the same per-instance data before advancing in the buffer by one element. If it's per vertex data, then set this value to 0.
     };
-    simpleInputLayoutDesc.pInputElementDescs = simpleInputElementDesc;
-    simpleInputLayoutDesc.NumElements = 1; //Only vertex right now.
-    simplePSODesc.DepthStencilState.DepthEnable = FALSE;
-    simplePSODesc.DepthStencilState.StencilEnable = FALSE;
-    simplePSODesc.SampleMask = UINT_MAX; //The sample mask for the blend state. Use in Multisampling to selectively enable or disable certain/specific samples.
-    simplePSODesc.RasterizerState = simpleRasterizerDesc;
-    simplePSODesc.InputLayout = simpleInputLayoutDesc;
-    //simplePSODesc.IBStripCutValue, we are not filling this cause we don't have an index buffer.
-    simplePSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    simplePSODesc.NumRenderTargets = 1;
-    simplePSODesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-    simplePSODesc.NodeMask = 0; //Remember just like the 'NodeMask' in the createrootsignature method, this is for multiGPU systems where we are using node masks to choose between GPUs.
-    simplePSODesc.pRootSignature = uRootSignature.Get();
+    firstpassInputLayoutDesc.pInputElementDescs = firstpassInputElementDesc;
+    firstpassInputLayoutDesc.NumElements = 1; //Only vertex right now.
+    firstpassPSODesc.DepthStencilState.DepthEnable = FALSE;
+    firstpassPSODesc.DepthStencilState.StencilEnable = FALSE;
+    firstpassPSODesc.SampleMask = UINT_MAX; //The sample mask for the blend state. Use in Multisampling to selectively enable or disable certain/specific samples.
+    firstpassPSODesc.RasterizerState = simpleRasterizerDesc;
+    firstpassPSODesc.InputLayout = firstpassInputLayoutDesc;
+    //firstpassPSODesc.IBStripCutValue, we are not filling this cause we don't have an index buffer.
+    firstpassPSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    firstpassPSODesc.NumRenderTargets = 1;
+    firstpassPSODesc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_UNORM;
+    firstpassPSODesc.NodeMask = 0; //Remember just like the 'NodeMask' in the createrootsignature method, this is for multiGPU systems where we are using node masks to choose between GPUs.
+    firstpassPSODesc.pRootSignature = uRootSignature.Get();
     Shader triangleShader("../shaders/simple.vert","../shaders/simple.pixel");
     SimpleShaderByteCode triangleByteCode = triangleShader.getShaderByteCode();
-    simplePSODesc.VS = triangleByteCode.vsByteCode;
-    simplePSODesc.PS = triangleByteCode.psByteCode;
-    d3d12Device->CreateGraphicsPipelineState(&simplePSODesc, IID_PPV_ARGS(&simplePSO));
+    firstpassPSODesc.VS = triangleByteCode.vsByteCode;
+    firstpassPSODesc.PS = triangleByteCode.psByteCode;
+    d3d12Device->CreateGraphicsPipelineState(&firstpassPSODesc, IID_PPV_ARGS(&firstpassPSO));
+
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> presentpassPSO;
+    D3D12_INPUT_LAYOUT_DESC presentpassInputLayoutDesc = {};
+    D3D12_INPUT_ELEMENT_DESC presentpassInputElementDesc[] = {
+    "POSITION",
+    0,
+    DXGI_FORMAT_R32G32B32_FLOAT,
+    0,
+    0,
+    D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+    0
+    };
+    presentpassInputLayoutDesc.pInputElementDescs = presentpassInputElementDesc;
+    presentpassInputLayoutDesc.NumElements = 1;
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC presentpassPSODesc = {};
+    presentpassPSODesc.SampleDesc = swapSampleDesc;
+    presentpassPSODesc.SampleMask = UINT_MAX;
+    presentpassPSODesc.BlendState = opaqueBlendDesc;
+    presentpassPSODesc.DepthStencilState.DepthEnable = FALSE;
+    presentpassPSODesc.DepthStencilState.StencilEnable = FALSE;
+    presentpassPSODesc.RasterizerState = simpleRasterizerDesc;
+    presentpassPSODesc.InputLayout = presentpassInputLayoutDesc;
+    presentpassPSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    presentpassPSODesc.NumRenderTargets = 1;
+    presentpassPSODesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    presentpassPSODesc.pRootSignature = uRootSignature.Get();
+    Shader quadShader("../shaders/quad.vert", "../shaders/quad.pixel");
+    SimpleShaderByteCode quadByteCode = quadShader.getShaderByteCode();
+    presentpassPSODesc.VS = quadByteCode.vsByteCode;
+    presentpassPSODesc.PS = quadByteCode.psByteCode;
+    d3d12Device->CreateGraphicsPipelineState(&presentpassPSODesc, IID_PPV_ARGS(&presentpassPSO));
 
     int textureWidth, textureHeight, nrChannels;
     std::string texturePath = "C:/Users/broia/Downloads/practicetexture.png";
@@ -459,7 +515,7 @@ int main(){
         return -1;
     }
 
-    hr = d3d12Device->CreatePlacedResource(defaultHeap.Get(), 0, &gBufferDesc, D3D12_RESOURCE_STATE_RENDER_TARGET, nullptr, IID_PPV_ARGS(&backbufferRTs[2]));
+    hr = d3d12Device->CreatePlacedResource(defaultHeap.Get(), 0, &gBufferDesc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&backbufferRTs[2]));
     if(FAILED(hr)){
         std::cout<<"G buffer placement error!";
         PrintDebugMessages();
@@ -472,18 +528,15 @@ int main(){
 
     D3D12_RENDER_TARGET_VIEW_DESC gBufferViewDesc = {};
     gBufferViewDesc.Texture2D = gBufferRTV;
-    gBufferViewDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    gBufferViewDesc.Format = DXGI_FORMAT_R16G16B16A16_UNORM;
     gBufferViewDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-
 
     hr = d3d12Device->CreatePlacedResource(defaultHeap.Get(), gBufferDHSize, &textureDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture));
     if(FAILED(hr)){
         std::cout<<"Texture resource placement error!";
         return -1;
     }
-
     d3d12Device->CreateRenderTargetView(backbufferRTs[2].Get(), &gBufferViewDesc, bbRTVHandle);
-
 
     //Command queues will execute command lists and signal a fence.
     //Command allocator. A memory pool for where a commands will be placed for the GPU to read. Through a frame from the CPU side, each command is allocated through command lists in a command allocator. Commands are recorded to the command list, when a command list opens, it starts recording commands, and when the command list closes, it stops. So if we want multiple command lists in the command allocator, we must stop the recording of one list and then only move to another. So can only use the command allcoator with multiple command lists if they're all closed of course.
@@ -500,7 +553,7 @@ int main(){
     hr = d3d12Device->CreateCommandList(0,//Node mask, GPU(s)
                                         D3D12_COMMAND_LIST_TYPE_DIRECT,
                                         primaryCommandAllocator.Get(),
-                                        simplePSO.Get(),
+                                        firstpassPSO.Get(),
                                         IID_PPV_ARGS(&triangleCommandList));
     if(FAILED(hr)){
         std::cout<<"Triangle Command list creation failed!";
@@ -611,7 +664,7 @@ int main(){
     texSRV.PlaneSlice = 0;
     texSRV.ResourceMinLODClamp = 0.0f;
     D3D12_SHADER_RESOURCE_VIEW_DESC texView = {};
-    texView.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    texView.Format = DXGI_FORMAT_R16G16B16A16_UNORM;
     texView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     texView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     texView.Texture2D = texSRV;
@@ -641,12 +694,11 @@ int main(){
             std::cout<<"Command allocator is reset during the start of each frame, and it couldn't reset!";
             return -1;
         }
-        hr = triangleCommandList->Reset(primaryCommandAllocator.Get(), simplePSO.Get());
+        hr = triangleCommandList->Reset(primaryCommandAllocator.Get(), firstpassPSO.Get());
         if(FAILED(hr)){
             std::cout<<"Command list is reset during the start of each frame, and it couldn't reset!";
             return -1;
         }
-        //triangleCommandList->SetPipelineState(simplePSO.Get()); Don't need to do this because I have already set the pipeline state while resetting the command list.
         triangleCommandList->SetGraphicsRootSignature(uRootSignature.Get());
         // RTV heaps that we use for presenting to the screen, and not for rendering to a frame buffer or for re-use by the shader, do not need to be set with SetDescriptorHeaps, they are instead set by OMSetRenderTarget. If I wanted to reuse those render targets, then I should create a frame buffer and while creating the rtv in the RTVHeapDesc, I should have used the flag for ALLOW_RENDER_TARGET. Now I can re-use the same RTVs for both Framebuffer and for the swapchain, btu then the swapchain format would need to be the same as the RTV format, and we will lose lots of information with only 1 byte for each color channel.
         ID3D12DescriptorHeap* dHeaps[] = { uniformHeap.Get(), samplerHeap.Get() };
@@ -675,9 +727,10 @@ int main(){
         bbBarrierRender.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; //Transition of a set of subreosuces between different usages. The caller must specify the before and after usages of the subresources.
         bbBarrierRender.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
         D3D12_RESOURCE_TRANSITION_BARRIER bbTransition = {}; //Describes the transition of subresources between different usages.
-        bbTransition.pResource = backbufferRTs[frameIndex].Get();
+        //bbTransition.pResource = backbufferRTs[frameIndex].Get();
+        bbTransition.pResource = backbufferRTs[2].Get(); //First it's the render texture for firstpass
         bbTransition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES; //Transition all subresources at the same time when transitioning state of a resource.
-        bbTransition.StateBefore = D3D12_RESOURCE_STATE_PRESENT; // The swapchain will always initialize the backbuffers into the present sate, and after that, these states will always have been at the present state after rendering anyways.
+        bbTransition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
         bbTransition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         bbBarrierRender.Transition = bbTransition;
         triangleCommandList->ResourceBarrier(1, &bbBarrierRender); //A resource barrier is a command you insert into a command list to inform the GPU driver that a resource (like a texture or buffer) is about to be used in a different way than before. This helps the GPU synchronize access to that resource and avoid hazards such as reading while writing or using stale data.
@@ -691,15 +744,39 @@ int main(){
                                                    );
         triangleCommandList->OMSetRenderTargets(1, &bbRTVHandle, FALSE, nullptr); //Nullptr and false since no depth/stencil.
         triangleCommandList->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        triangleCommandList->IASetVertexBuffers(0, 1, &vbView);
+        triangleCommandList->IASetVertexBuffers(0, 1, &triangleVBView);
         triangleCommandList->DrawInstanced(3, 1, 0, 0);
+
+        D3D12_RESOURCE_BARRIER bbBarrierRead = {};
+        bbBarrierRead.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+        bbBarrierRead.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        bbTransition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        bbTransition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        bbBarrierRead.Transition = bbTransition;
+        triangleCommandList->ResourceBarrier(1, &bbBarrierRead);
+
+        triangleCommandList->SetPipelineState(presentpassPSO.Get()); //Since I have 2 pipelinestates now.
+        bbRTVHandle = backBufferRTVHeap->GetCPUDescriptorHandleForHeapStart();
+        bbRTVHandle.ptr += frameIndex * rtvDescriptorIncrementSize; 
+        bbTransition.pResource = backbufferRTs[frameIndex].Get();
+        bbTransition.StateBefore = D3D12_RESOURCE_STATE_PRESENT; // The swapchain will always initialize the backbuffers into the present sate, and after that, these states will always have been at the present state after rendering anyways.
+        bbTransition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        bbBarrierRender.Transition = bbTransition;
+
+        triangleCommandList->ResourceBarrier(1, &bbBarrierRead);
         D3D12_RESOURCE_BARRIER bbBarrierPresent = {};
         bbBarrierPresent.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
         bbBarrierPresent.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         bbTransition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
         bbTransition.StateAfter= D3D12_RESOURCE_STATE_PRESENT;
         bbBarrierPresent.Transition = bbTransition;
+
+        triangleCommandList->ClearRenderTargetView(bbRTVHandle, clearColor, 0, nullptr);
+        triangleCommandList->IASetVertexBuffers(0, 1, &quadVBView); //Using the same slot as the previous vertex buffer because this is a different pass and both the vertex buffers don't need to be set at the same time.
+        triangleCommandList->IASetIndexBuffer(&quadIBView);
+        triangleCommandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
         triangleCommandList->ResourceBarrier(1, &bbBarrierPresent);
+
         //I set a PSO, I set root signatures, I set descriptor heaps, I binded the descriptor tables, I got my viewport and scissor rect ready, I have also made a resource barrier and resource.
         hr = triangleCommandList->Close();
         if(FAILED(hr)){
