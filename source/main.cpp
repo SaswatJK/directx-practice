@@ -239,9 +239,9 @@ int main(){
     triangleVBView.StrideInBytes = sizeof(Vertex);
 
     D3D12_VERTEX_BUFFER_VIEW quadVBView = {};
-    triangleVBView.SizeInBytes = sizeof(quad);
-    triangleVBView.BufferLocation = uniformBuffer->GetGPUVirtualAddress() + 256 + sizeof(triangle);
-    triangleVBView.StrideInBytes = sizeof(Vertex);
+    quadVBView.SizeInBytes = sizeof(quad);
+    quadVBView.BufferLocation = uniformBuffer->GetGPUVirtualAddress() + 256 + sizeof(triangle);
+    quadVBView.StrideInBytes = sizeof(Vertex);
 
     D3D12_INDEX_BUFFER_VIEW quadIBView = {};
     quadIBView.SizeInBytes = sizeof(quadIndices);
@@ -763,14 +763,14 @@ int main(){
         bbTransition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         bbBarrierRender.Transition = bbTransition;
 
-        triangleCommandList->ResourceBarrier(1, &bbBarrierRead);
+        triangleCommandList->ResourceBarrier(1, &bbBarrierRender);
         D3D12_RESOURCE_BARRIER bbBarrierPresent = {};
         bbBarrierPresent.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
         bbBarrierPresent.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         bbTransition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
         bbTransition.StateAfter= D3D12_RESOURCE_STATE_PRESENT;
         bbBarrierPresent.Transition = bbTransition;
-
+        triangleCommandList->OMSetRenderTargets(1, &bbRTVHandle, FALSE, nullptr); //Nullptr and false since no depth/stencil.
         triangleCommandList->ClearRenderTargetView(bbRTVHandle, clearColor, 0, nullptr);
         triangleCommandList->IASetVertexBuffers(0, 1, &quadVBView); //Using the same slot as the previous vertex buffer because this is a different pass and both the vertex buffers don't need to be set at the same time.
         triangleCommandList->IASetIndexBuffer(&quadIBView);
