@@ -1,13 +1,6 @@
 #include "../include/utils.h"
 #include "../include/shader.h"
-#include "D3D12/d3d12.h"
-#include "D3D12/d3dx12_core.h"
-#include "D3D12/dxgiformat.h"
-#include <combaseapi.h>
-#include <intsafe.h>
-#include <malloc.h>
-#include <wrl/client.h>
-#include <wrl/implements.h>
+//#include "../include/graphics.h"
 
 UINT windowWidth = 1000;
 UINT windowHeight = 1000;
@@ -30,10 +23,6 @@ void PrintDebugMessages() {
 
     infoQueue->ClearStoredMessages();
 }
-
-typedef struct{
-    float pos[3];
-}Vertex;
 
 int main(){
     SDL_Init(SDL_INIT_VIDEO);
@@ -145,7 +134,7 @@ int main(){
 
     //First let's make the Uniforms
 
-    float color[4] = { 1.0f, 0.5f, 0.5f, 1.0f };
+    float color[4] = { 0.0f, 0.5f, 0.5f, 1.0f };
     float metallic[4] = { 1.0f, 0.2f, 0.0f, 1.0f };
 
     Vertex triangle[3] = {
@@ -806,6 +795,11 @@ int main(){
             }
             WaitForSingleObject(fenceEvent, INFINITE); //Basically saying that the CPU thread should wait an 'INFINITE' amount of time until event has been signaled. The thread will do other things, and the reason we don't just run an infinite loop instead, checking and seeing if the fence value is reached or not, is because the thread will not be free for other tasks + the memory will keep being accessed over and over again, which may not be bad since cache, but it'll waste the other 64-8 bytes in the cache.
         }
+        mappedData = nullptr;
+        color[0] = color[0] + 0.003;
+        uniformBuffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+        memcpy(mappedData, &color, 16);
+        uniformBuffer->Unmap(0, nullptr);
         frameIndex = swapChain->GetCurrentBackBufferIndex();
         fenceValue++;
         PrintDebugMessages();

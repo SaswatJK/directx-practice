@@ -13,6 +13,7 @@ SamplerState mySampler : register(s0);
 float4 PSMain(PSInput input) : SV_TARGET {
     float2 dummyUV = float2(0.1065, 0.7925); // Sample from the center
     float4 finalColor;
-    finalColor = myTexture.Sample(mySampler, dummyUV);
+    //finalColor = myTexture.Sample(mySampler, dummyUV);
+    finalColor = color;
     return finalColor;
 }
