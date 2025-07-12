@@ -38,19 +38,21 @@ typedef enum {
     RENDER = 0,
     LIST_COUNT
 }cmdList;
+
 typedef enum {
     UPLOAD_HEAP = 0,
     DEFAULT_HEAP,
     HEAP_COUNT
 }heapInfo;
+
 typedef enum {
     VERTEX_BUFFER = 0, //Will upload all vertex buffers in teh same resource, and the views will differentiate, am not gonnna do much premature optimisations right now.
     INDEX_BUFFER,
     CONSTANT_BUFFER,
     INTERMEDDIATE_BUFFER,
-    TEXTURE_2D,
     BUFFER_COUNT
 }bufferInfo;
+
 typedef enum {
     SRV_CBV_UAV_DH = 0,
     RTV_DH,
@@ -58,20 +60,29 @@ typedef enum {
     DH_COUNT
 }dhInfo;
 
+typedef enum {
+    SRV = 0,
+    CBV,
+    RTV,
+    UAV,
+    SAMPLER,
+    VIEW_COUNT
+}viewInfo;
+
+
 typedef struct{
     float pos[3];
 }Vertex;
 
+//I think DOD wise this is bad beacuse when I am trying to get data, I will probably want ot get heap data, resource data and views at the same time, so I am wasting cache right? They all have 8 byt alignment cause arary doesn't get affected.
 typedef struct {
     Microsoft::WRL::ComPtr<ID3D12Heap> heaps[HEAP_COUNT];
     Microsoft::WRL::ComPtr<ID3D12Resource> buffers[BUFFER_COUNT];
-    UINT64 heapOffsets[HEAP_COUNT] = {0};
-}D3DResources;
-
-typedef struct {
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> texture2Ds;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptorHeaps[DH_COUNT];
-    //DOn't know if I should put the descriptor ranges and tables in here as well??
-}D3DDescriptorHeap;
+    std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> cpuHandles[VIEW_COUNT];
+    UINT32 heapOffsets[HEAP_COUNT] = {0};
+}D3DResources;
 
 typedef struct { //prefix of x meaning it's dxgi
     Microsoft::WRL::ComPtr<IDXGIFactory7> xFactory;//Latest version of factory, can check feature support, preference of GPU, as well as warp works

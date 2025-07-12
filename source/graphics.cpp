@@ -79,3 +79,11 @@ Engine::Engine(){
         return;
     }
 };
+
+void Engine::prepareData(){
+
+}
+
+void Engine::initializeHeaps(){
+    
+};

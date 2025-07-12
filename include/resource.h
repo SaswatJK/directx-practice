@@ -1,3 +1,4 @@
+#pragma once
 #include "D3D12/d3d12.h"
 #include "utils.h"
 #include <wrl/client.h>
@@ -38,9 +39,9 @@ namespace Heap{
 
 namespace Buffer{
     //I am so confused, I wasted so many hours thinking of a data agnostinc way of uplaoding to buffers but I know what I will upload in the vertex and constant buffer tho... I guess it'll be useful for constant and intermmediate bufferse?
-    void createVertexBuffer(const std::vector<Vertex> &data, const D3DGlobal &d3D, D3DResources &resources); //width should be the sum of the data.
-    void createIndexBuffer(const std::vector<UINT32> &data, const D3DGlobal &d3D, D3DResources &resources);
-    void createConstantBuffer(const PSPArray &data, const D3DGlobal &d3D, D3DResources &resources);
-    void createIntermeddiateBuffer(const PSPArray &data, const D3DGlobal &d3D, D3DResources &resources);
-    void create2DTexture(const PSPArray &data, UINT width, UINT height, DXGI_FORMAT, const D3DGlobal &d3D, D3DResources &resources);
+    void initVertexBuffer(const std::vector<Vertex> &data, const D3DGlobal &d3D, D3DResources &resources); //width should be the sum of the data.
+    void initIndexBuffer(const std::vector<UINT32> &data, const D3DGlobal &d3D, D3DResources &resources);
+    void initConstantBuffer(const PSPArray &data, const D3DGlobal &d3D, D3DResources &resources);
+    void initIntermeddiateBuffer(const PSPArray &data, const D3DGlobal &d3D, D3DResources &resources);
+    void init2DTexture(void* data, UINT width, UINT height, DXGI_FORMAT, const D3DGlobal &d3D, D3DResources &resources);
 };

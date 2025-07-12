@@ -33,7 +33,7 @@ void Heap::createDefaultHeap(UINT size, const D3DGlobal &d3D, D3DResources &reso
     }
 }
 
-void Buffer::createVertexBuffer(const std::vector<Vertex> &data, const D3DGlobal &d3D, D3DResources &resources){
+void Buffer::initVertexBuffer(const std::vector<Vertex> &data, const D3DGlobal &d3D, D3DResources &resources){
     D3D12_RESOURCE_DESC desc = {};
     DXGI_SAMPLE_DESC sampleDesc = {}; //Multisampling, mandatory to fill even for resources that don't make sense
     sampleDesc.Count = 1;
@@ -65,9 +65,11 @@ void Buffer::createVertexBuffer(const std::vector<Vertex> &data, const D3DGlobal
     memcpy(mappedData, data.data(), dataSize);
     resources.buffers[VERTEX_BUFFER]->Unmap(0, nullptr);
     resources.heapOffsets[UPLOAD_HEAP] += 65536;
+
+    //we craete views here as well yipee.
 }
 
-void Buffer::createIndexBuffer(const std::vector<UINT32> &data, const D3DGlobal &d3D, D3DResources &resources){
+void Buffer::initIndexBuffer(const std::vector<UINT32> &data, const D3DGlobal &d3D, D3DResources &resources){
     D3D12_RESOURCE_DESC desc = {};
     DXGI_SAMPLE_DESC sampleDesc = {}; //Multisampling, mandatory to fill even for resources that don't make sense
     sampleDesc.Count = 1;
@@ -99,7 +101,7 @@ void Buffer::createIndexBuffer(const std::vector<UINT32> &data, const D3DGlobal 
     resources.heapOffsets[UPLOAD_HEAP] += 65536;
 }
 
-void Buffer::createConstantBuffer(const PSPArray &data, const D3DGlobal &d3D, D3DResources &resources){
+void Buffer::initConstantBuffer(const PSPArray &data, const D3DGlobal &d3D, D3DResources &resources){
     D3D12_RESOURCE_DESC desc = {};
     UINT dataSize = 256; //I'm not goind to do a bunch of crazy stuff..
     DXGI_SAMPLE_DESC sampleDesc = {}; //Multisampling, mandatory to fill even for resources that don't make sense
@@ -135,4 +137,56 @@ void Buffer::createConstantBuffer(const PSPArray &data, const D3DGlobal &d3D, D3
     resources.heapOffsets[UPLOAD_HEAP] += 65536;
 }
 
+void Buffer::initIntermeddiateBuffer(const PSPArray &data, const D3DGlobal &d3D, D3DResources &resources){
+    D3D12_RESOURCE_DESC desc = {};
+    UINT dataSize = 0;
+    DXGI_SAMPLE_DESC sampleDesc = {}; //Multisampling, mandatory to fill even for resources that don't make sense
+    sampleDesc.Count = 1;
+    sampleDesc.Quality = 0;
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; //Buffer resource, and not a texture resource
+    desc.Alignment = 0;
+    desc.Height = 1;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Format = DXGI_FORMAT_UNKNOWN; //Buffers are basically typeless
+    desc.SampleDesc = sampleDesc;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    for(UINT i = 0; i < data.count; i++)
+        dataSize += data.arr[i].size;
+    desc.Width = dataSize;
+    HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[UPLOAD_HEAP].Get(),
+                                                  resources.heapOffsets[UPLOAD_HEAP], &desc,
+                                                  D3D12_RESOURCE_STATE_GENERIC_READ, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
+                                                  nullptr, //optimized clear value
+                                                  IID_PPV_ARGS(&resources.buffers[INTERMEDDIATE_BUFFER]));
+    if(FAILED(hr)){
+    std::cerr<<"Error placement for constant buffer failed!";
+    return;
+    };
+    UINT8* mappedData = nullptr;
+    resources.buffers[INTERMEDDIATE_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(mappedData));
+    UINT8* currentPtr = mappedData;
+    for(UINT i = 0; i < data.count; i++){
+        memcpy(mappedData, data.arr[i].data, data.arr[i].size);
+        currentPtr += data.arr[i].size;
+    }
+    UINT rmdr = 1;
+    resources.buffers[INTERMEDDIATE_BUFFER]->Unmap(0, nullptr);
+    if (dataSize > 65536){
+        rmdr = dataSize / 65536;
+        rmdr++;
+    }
+    resources.heapOffsets[UPLOAD_HEAP] += rmdr * 65536;
+}
 
+void Buffer::init2DTexture(void* data, UINT width, UINT height, DXGI_FORMAT, const D3DGlobal &d3D, D3DResources &resources){
+    //Thinking if I should upload all textures at once and just create different views?? I think so cause I will hav eto do it regardless.
+    D3D12_RESOURCE_DESC desc = {};
+    DXGI_SAMPLE_DESC sampleDesc = {}; //Multisampling, mandatory to fill even for resources that don't make sense
+    sampleDesc.Count = 1;
+    sampleDesc.Quality = 0;
+    desc.SampleDesc = sampleDesc;
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+}
