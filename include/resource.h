@@ -6,14 +6,25 @@
 #include <vector>
 
 typedef struct{
-    void* data;
-    UINT size;
+    void* data; //Pointer to a resource.
+    UINT size; //Size in bytes, of the resouce.
 }PtrSizePair;
 
 typedef struct{
+    Vertex* data; //Pointer to a vector of vertex array.
+    UINT size; //Size in bytes, of the vertex vertex array, for each view.
+}VertexSizePair;
+
+typedef union{
+    typedef struct{
     PtrSizePair* arr;
     size_t count;
-}PSPArray;
+    }PSPArray;
+    typedef struct{
+    VertexSizePair* arr;
+    size_t count;
+    }VSPArray;
+}DataArray;
 
 D3D12_HEAP_PROPERTIES uploadHeapProperties = {
     D3D12_HEAP_TYPE_UPLOAD, //Type upload is the best for CPU read once and GPU write once Data. This type has CPU access optimized for uploading to the GPU, which is why it has a CPU virtual address, not just a GPU one. Resouurce on this Heap must be created with GENERIC_READ
@@ -33,15 +44,16 @@ D3D12_HEAP_PROPERTIES defaultHeapProperties = {
 };
 
 namespace Heap{
-    void createUploadHeap(UINT size, const D3DGlobal &d3D, D3DResources &resources);
-    void createDefaultHeap(UINT size, const D3DGlobal &d3D, D3DResources &resources);
+    void createHeap(UINT size, heapInfo heap, const D3DGlobal &d3D, D3DResources &resources);
+    void createDescriptorHeap(dhInfo dh, D3D12_DESCRIPTOR_HEAP_TYPE type, D3D12_DESCRIPTOR_HEAP_FLAGS flag, const D3DGlobal &d3D, D3DResources &resources);
 };
 
 namespace Buffer{
     //I am so confused, I wasted so many hours thinking of a data agnostinc way of uplaoding to buffers but I know what I will upload in the vertex and constant buffer tho... I guess it'll be useful for constant and intermmediate bufferse?
-    void initVertexBuffer(const std::vector<Vertex> &data, const D3DGlobal &d3D, D3DResources &resources); //width should be the sum of the data.
-    void initIndexBuffer(const std::vector<UINT32> &data, const D3DGlobal &d3D, D3DResources &resources);
-    void initConstantBuffer(const PSPArray &data, const D3DGlobal &d3D, D3DResources &resources);
-    void initIntermeddiateBuffer(const PSPArray &data, const D3DGlobal &d3D, D3DResources &resources);
-    void init2DTexture(void* data, UINT width, UINT height, DXGI_FORMAT, const D3DGlobal &d3D, D3DResources &resources);
+    void initVertexBuffer(const DataArray::VSPArray &data, const D3DGlobal &d3D, D3DResources &resources); //width should be the sum of the data.
+    void initIndexBuffer(const DataArray::PSPArray &data, const D3DGlobal &d3D, D3DResources &resources);
+    void initConstantBuffer(const DataArray::PSPArray &data, const D3DGlobal &d3D, D3DResources &resources);
+    void initIntermeddiateBuffer(const DataArray::PSPArray &data, const D3DGlobal &d3D, D3DResources &resources); //Remember to get the offset of this buffer from the heap before calling this function, for better view control.
+    void create2DTexture(void* data, UINT width, UINT height, DXGI_FORMAT, const D3DGlobal &d3D, D3DResources &resources); //For like RTVs for frame buffers.
+    void init2DTexture(void* data, UINT width, UINT height, UINT nrChannels, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources); //Copy stuff from intermeddiate buffer/upload heap to default heap. The question is, should I use createpalcedresource for the intermeddiate case or createcommittedreosurce
 };
