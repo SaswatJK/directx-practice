@@ -78,6 +78,23 @@ Engine::Engine(){
         std::cout<<"Triangle Command list creation failed!";
         return;
     }
+    d3D.commandLists[RENDER]->Close();
+    hr = d3D.device->CreateFence(0, //Initial fence value
+                                  D3D12_FENCE_FLAG_NONE, //Flag for if shared or not. We would want shared fence for syncrhonization after multi-threading, or we can also have a flag for cross-adapter fences, we would want multiple fences for multithreading. Different threads in the CPU build different command lists and command allocators, then different fences syncrhonize the GPU as well while doing execution of said allocators.
+                                  IID_PPV_ARGS(&d3D.fence));
+    if(FAILED(hr)){
+        std::cout<<"Fence creation failed!";
+        return;
+    }
+    d3D.fenceEvent = CreateEvent(nullptr, //Handle cannot be inhereted by child processes.
+                                    FALSE, //If this parameter is FALSE, the function creates an auto-reset event object, and the system automatically resets the event state to nonsignaled after a single waiting thread has been released.
+                                    FALSE, //If this parameter is TRUE, the initial state of the event object is signaled; otherwise, it is nonsignaled.
+                                    nullptr //If lpName is NULL, the event object is created without a name.
+                                    );
+    if(d3D.fenceEvent == nullptr){
+        std::cout<<"Fence Event creation failed!";
+        return;
+    }
 };
 
 void Engine::prepareData(){

@@ -74,14 +74,16 @@ typedef struct{
     float pos[3];
 }Vertex;
 
-//I think DOD wise this is bad beacuse when I am trying to get data, I will probably want ot get heap data, resource data and views at the same time, so I am wasting cache right? They all have 8 byt alignment cause arary doesn't get affected.
+//ALl have 8 byte alignment.
 typedef struct {
-    Microsoft::WRL::ComPtr<ID3D12Heap> heaps[HEAP_COUNT];
-    Microsoft::WRL::ComPtr<ID3D12Resource> buffers[BUFFER_COUNT];
-    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> texture2Ds;
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptorHeaps[DH_COUNT];
-    std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> cpuHandles[VIEW_COUNT];
+    Microsoft::WRL::ComPtr<ID3D12Heap> heaps[HEAP_COUNT]; //All the heaps that will be used at once.
+    Microsoft::WRL::ComPtr<ID3D12Resource> buffers[BUFFER_COUNT]; //All the buffer resources that will be used at once.
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> texture2Ds; //All the textures that will be used at once.
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptorHeaps[DH_COUNT]; //All the descriptor heaps that will be used at once.
+    std::vector<D3D12_VERTEX_BUFFER_VIEW> vbViews;
+    std::vector<D3D12_INDEX_BUFFER_VIEW> ibViews;
     UINT32 heapOffsets[HEAP_COUNT] = {0};
+    UINT32 descriptorInHeapCount[DH_COUNT] = {0};
 }D3DResources;
 
 typedef struct { //prefix of x meaning it's dxgi
@@ -98,4 +100,6 @@ typedef struct { //prefix of x meaning it's dxgi
     // For performance reasons, the application must specify at initialization time the maximum number of command lists they will record concurrently.
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocators[ALLOCATOR_COUNT];
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList10> commandLists[LIST_COUNT];
+    Microsoft::WRL::ComPtr<ID3D12Fence1> fence;
+    HANDLE fenceEvent;
 }D3DGlobal;
