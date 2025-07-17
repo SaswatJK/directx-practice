@@ -20,6 +20,7 @@ private:
     D3DGlobal d3D;
     D3DResources resource;
     Microsoft::WRL::ComPtr<ID3D12InfoQueue> infoQueue;
+    void PrintDebugMessages();
 //    SDL_WINDOW* window = nullptr;
 public:
     Engine();

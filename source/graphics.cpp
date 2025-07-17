@@ -1,10 +1,30 @@
 #include "../include/graphics.h"
+#include "../include/resource.h"
 #include "D3D12/d3d12.h"
+#include "D3D12/dxgiformat.h"
+#include "shader.h"
 #include "utils.h"
 #include <combaseapi.h>
 #include <dxgi.h>
 #include <dxgi1_5.h>
+#include <filesystem>
 #include <wrl/client.h>
+
+void Engine:: PrintDebugMessages() {
+    UINT64 messageCount = infoQueue->GetNumStoredMessages();
+
+    for (UINT64 i = 0; i < messageCount; i++) {
+        SIZE_T messageLength = 0;
+        infoQueue->GetMessage(i, NULL, &messageLength);
+
+        D3D12_MESSAGE* message = (D3D12_MESSAGE*)malloc(messageLength);
+        infoQueue->GetMessage(i, message, &messageLength);
+
+        printf("D3D12 Message: %s\n", message->pDescription);
+        free(message);
+    }
+    infoQueue->ClearStoredMessages();
+}
 
 Engine::Engine(){
     SDL_Init(SDL_INIT_VIDEO);
@@ -79,6 +99,9 @@ Engine::Engine(){
         return;
     }
     d3D.commandLists[RENDER]->Close();
+    //Synchronization. Why it's important. So the GPU and CPU are both working simulatenously, however, we don't want one to overtake the other, we don't want the CPU to overtake and change the PSO before the frame has been completed by the GPU and cause errors, and we don't want the GPU to start making frames before updating uniforms and stuff by the CPU.
+    //A fence is one of the most simple synchronization objects. It exists in both the CPU and the GPU. It has an internal integer counter, and can trigger events on either the GPU or the GPU when the counter reached a certain value, that we can specify.
+    //This can be done to trigger an event on the CPU when a command allocator's commands have been executed fully, or we can have the GPU wait while the CPu is completing a certain operation first, or we can get the command queues (if multiple exists), on the GPU to wait upon one another.
     hr = d3D.device->CreateFence(0, //Initial fence value
                                   D3D12_FENCE_FLAG_NONE, //Flag for if shared or not. We would want shared fence for syncrhonization after multi-threading, or we can also have a flag for cross-adapter fences, we would want multiple fences for multithreading. Different threads in the CPU build different command lists and command allocators, then different fences syncrhonize the GPU as well while doing execution of said allocators.
                                   IID_PPV_ARGS(&d3D.fence));
@@ -98,9 +121,64 @@ Engine::Engine(){
 };
 
 void Engine::prepareData(){
+    Vertex triangle[3] = {
+        {{0.0f, 0.5f, -0.5f}},
+        {{0.5f, -0.5f, 0.5f}},
+        {{-0.5, -0.5f, 0.0f}}
+    };
 
+    Vertex quad[4] = {
+        {{-1.0f, -1.0f, 0.0f}}, //bottom left
+        {{-1.0f, 1.0f, 0.0f}}, //Top left
+        {{1.0f, 1.0f, 0.0f}}, //Top right
+        {{1.0f, -1.0f, 0.0f}} //Bottom right
+    };
+
+    unsigned int quadIndices[6] = {
+        0, 1, 2, //top left triangle
+        2, 3, 0 //bottom right triangle
+    };
+    float color[4] = { 0.0f, 0.5f, 0.5f, 1.0f };
+    float metallic[4] = { 1.0f, 0.2f, 0.0f, 1.0f };
+    int textureWidth, textureHeight, nrChannels;
+    std::string texturePath = "C:/Users/broia/Downloads/practicetexture.png";
+    unsigned char* textureData = stbi_load(texturePath.c_str(), &textureWidth, &textureHeight, &nrChannels, 0);
+    if (textureData == nullptr)
+        std::cout<<"Texture data can't be opened in memory!";
+    VertexSizePair triAndQuad[2];
+    triAndQuad[0].data = triangle;
+    triAndQuad[0].size = sizeof(triangle);
+    triAndQuad[1].data = quad;
+    triAndQuad[1].size = sizeof(quad);
+    DataArray vertexData = {};
+    vertexData.VSPArray.arr = triAndQuad;
+    vertexData.VSPArray.count = 2;
+    PtrSizePair quadIn;
+    quadIn.data = quadIndices;
+    quadIn.size = sizeof(quadIndices);
+    DataArray indexData = {};
+    indexData.PSPArray.arr = &quadIn;
+    indexData.PSPArray.count = 1;
+
+    //Creating upload Heap.
+    Heap::createHeap(0, heapInfo::UPLOAD_HEAP, d3D, resource);
+    Heap::createDescriptorHeap(dhInfo::SRV_CBV_UAV_DH, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
+    //Creating the vertex and index buffer.
+    Resource::initVertexBuffer(vertexData, d3D, resource);
+    Resource::initIndexBuffer(indexData, d3D, resource);
+    Heap::createDescriptorHeap(dhInfo::RTV_DH, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, d3D, resource);
+    //Creating the back buffers.
+    Resource::createBackBuffers(windowWidth, windowHeight, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
+    //Creating the gBuffer. Turns out I am not using my default heap for anything right now... Will figure out later.
+    Resource::createGPUTexture(windowWidth, windowHeight, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
+    Heap::createDescriptorHeap(dhInfo::SAMPLER_DH, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
+    Resource::createSimpleSampler(d3D, resource);
+    Resource::init2DTexture(textureData, textureWidth, textureHeight, nrChannels, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
+    //Creating a bindless root singature.
+    RootSignature::createBindlessRootSignature(d3D, resource);
+    //Creating the first pipeline state.
+    Shader renderShader("../shaders/simple.vert","../shaders/simple.pixel");
+    PipelineState::createGraphicsPSO(psoInfo::RENDER_PSO, renderShader, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
+    Shader quadShader("../shaders/quad.vert", "../shaders/quad.pixel");
+    PipelineState::createGraphicsPSO(psoInfo::PRESENT_PSO, quadShader, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
 }
-
-void Engine::initializeHeaps(){
-    
-};
