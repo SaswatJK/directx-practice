@@ -17,5 +17,5 @@ private:
     static std::string readShader(const std::string& shaderPath);
 public:
     Shader(const std::string& vsPath, const std::string& psPath);//AM PASSING REFERENCES CHECK AGAIN
-    SimpleShaderByteCode getShaderByteCode();
+    SimpleShaderByteCode getShaderByteCode() const;
 };

@@ -46,10 +46,15 @@ typedef enum {
 }heapInfo;
 
 typedef enum {
+    RENDER_PSO = 0,
+    PRESENT_PSO,
+    PSO_COUNT
+}psoInfo;
+
+typedef enum {
     VERTEX_BUFFER = 0, //Will upload all vertex buffers in teh same resource, and the views will differentiate, am not gonnna do much premature optimisations right now.
     INDEX_BUFFER,
     CONSTANT_BUFFER,
-    INTERMEDDIATE_BUFFER,
     BUFFER_COUNT
 }bufferInfo;
 
@@ -69,6 +74,13 @@ typedef enum {
     VIEW_COUNT
 }viewInfo;
 
+typedef enum {
+    BACKBUFFER0 = 0,
+    BACKBUFFER1,
+    GBUFFER,
+    //SHADOWBUFFER, //Can add Later.
+    RTV_COUNT
+}rtvInfo;
 
 typedef struct{
     float pos[3];
@@ -78,8 +90,10 @@ typedef struct{
 typedef struct {
     Microsoft::WRL::ComPtr<ID3D12Heap> heaps[HEAP_COUNT]; //All the heaps that will be used at once.
     Microsoft::WRL::ComPtr<ID3D12Resource> buffers[BUFFER_COUNT]; //All the buffer resources that will be used at once.
-    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> texture2Ds; //All the textures that will be used at once.
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptorHeaps[DH_COUNT]; //All the descriptor heaps that will be used at once.
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineStates[PSO_COUNT];
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> texture2Ds; //All the textures that will be used at once.
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature; // I think I can get away with only one root signature because of bindless.
     std::vector<D3D12_VERTEX_BUFFER_VIEW> vbViews;
     std::vector<D3D12_INDEX_BUFFER_VIEW> ibViews;
     UINT32 heapOffsets[HEAP_COUNT] = {0};
