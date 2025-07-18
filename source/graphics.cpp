@@ -2,13 +2,22 @@
 #include "../include/resource.h"
 #include "D3D12/d3d12.h"
 #include "D3D12/dxgiformat.h"
+#include "SDL3/SDL_events.h"
+#include "SDL3/SDL_video.h"
 #include "shader.h"
 #include "utils.h"
 #include <combaseapi.h>
 #include <dxgi.h>
 #include <dxgi1_5.h>
 #include <filesystem>
+#include <intsafe.h>
+#include <minwindef.h>
 #include <wrl/client.h>
+
+DXGI_SAMPLE_DESC sampleDesc = {
+    1, //Number of multisamples per pixel
+    0 //The image quality level. The higher the quality, the lower the performance. The valid range is between zero and one less than the level returned by ID3D10Device::CheckMultisampleQualityLevels for Direct3D 10 or ID3D11Device::CheckMultisampleQualityLevels for Direct3D 11.
+};
 
 void Engine:: PrintDebugMessages() {
     UINT64 messageCount = infoQueue->GetNumStoredMessages();
@@ -162,14 +171,26 @@ void Engine::prepareData(){
 
     //Creating upload Heap.
     Heap::createHeap(0, heapInfo::UPLOAD_HEAP, d3D, resource);
+    //PrintDebugMessages();
     Heap::createDescriptorHeap(dhInfo::SRV_CBV_UAV_DH, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
+    //PrintDebugMessages();
     //Creating the vertex and index buffer.
     Resource::initVertexBuffer(vertexData, d3D, resource);
+    //PrintDebugMessages();
     Resource::initIndexBuffer(indexData, d3D, resource);
+    //PrintDebugMessages();
     Heap::createDescriptorHeap(dhInfo::RTV_DH, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, d3D, resource);
+    //PrintDebugMessages();
     //Creating the back buffers.
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = resource.descriptorHeaps[RTV_DH]->GetCPUDescriptorHandleForHeapStart();
+    UINT rtvDescriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    UINT currentDescriptorHeapOffset = rtvDescriptorIncrementSize * resource.descriptorInHeapCount[RTV_DH];
+    handle.ptr += currentDescriptorHeapOffset;
+    backbufferPtr = handle.ptr;
     Resource::createBackBuffers(windowWidth, windowHeight, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
+    //PrintDebugMessages();
     //Creating the gBuffer. Turns out I am not using my default heap for anything right now... Will figure out later.
+    renderTextureOffset = resource.texture2Ds.size();
     Resource::createGPUTexture(windowWidth, windowHeight, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
     Heap::createDescriptorHeap(dhInfo::SAMPLER_DH, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
     Resource::createSimpleSampler(d3D, resource);
@@ -181,4 +202,149 @@ void Engine::prepareData(){
     PipelineState::createGraphicsPSO(psoInfo::RENDER_PSO, renderShader, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
     Shader quadShader("../shaders/quad.vert", "../shaders/quad.pixel");
     PipelineState::createGraphicsPSO(psoInfo::PRESENT_PSO, quadShader, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
+    PrintDebugMessages();
+}
+
+void Engine::render(){
+    bool running;
+    running = true;
+    SDL_Event sdlEvent;
+    if(!window){
+        std::cerr<<"SDL Window Creation has failed!";
+        return;
+    }
+    UINT frameIndex = 0;
+    UINT fenceValue = 1;
+    while(running){
+        while (SDL_PollEvent(&sdlEvent))
+            if(sdlEvent.type == SDL_EVENT_QUIT){
+                running = false;
+                break;
+            }
+        hr = d3D.commandAllocators[cmdAllocator::PRIMARY]->Reset();
+        if(FAILED(hr)){
+            std::cerr<<"Command allocator is reset during the start of each frame, and it couldn't reset!";
+            return;
+        }
+        hr = d3D.commandLists[cmdList::RENDER]->Reset(d3D.commandAllocators[cmdAllocator::PRIMARY].Get(), resource.pipelineStates[psoInfo::RENDER_PSO].Get());
+        if(FAILED(hr)){
+            std::cerr<<"Command list is reset during the start of each frame, and it couldn't reset!";
+            return;
+        }
+        d3D.commandLists[RENDER]->SetGraphicsRootSignature(resource.rootSignature.Get());
+        // RTV heaps that we use for presenting to the screen, and not for rendering to a frame buffer or for re-use by the shader, do not need to be set with SetDescriptorHeaps, they are instead set by OMSetRenderTarget. If I wanted to reuse those render targets, then I should create a frame buffer and while creating the rtv in the RTVHeapDesc, I should have used the flag for ALLOW_RENDER_TARGET. Now I can re-use the same RTVs for both Framebuffer and for the swapchain, btu then the swapchain format would need to be the same as the RTV format, and we will lose lots of information with only 1 byte for each color channel.
+        ID3D12DescriptorHeap* dHeaps[] = { resource.descriptorHeaps[dhInfo::SRV_CBV_UAV_DH].Get(), resource.descriptorHeaps[dhInfo::SAMPLER_DH].Get(), resource.descriptorHeaps[dhInfo::RTV_DH].Get()};
+        d3D.commandLists[RENDER]->SetDescriptorHeaps(_countof(dHeaps), dHeaps);
+        d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(0, //Root parameter index, base register + index (b0, b1, and dependingly...) in the shader. If range says 5 descriptors, then it will basically start from that base register range and form the uniform heap pointer, and then allocate 5 consecutive descriptors.
+                                                                resource.descriptorHeaps[SRV_CBV_UAV_DH]->GetGPUDescriptorHandleForHeapStart());
+
+        d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(1, resource.descriptorHeaps[SRV_CBV_UAV_DH]->GetGPUDescriptorHandleForHeapStart());
+
+        d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(2, resource.descriptorHeaps[SAMPLER_DH]->GetGPUDescriptorHandleForHeapStart());
+        //Each 'slot' in the root parameter can hold anyting from one descriptor to descriptor tables. Each descriptor table can have multiple ranges. Where a range describes a contiguous block of descriptors of same type. Set a certain table. So this binds the 0'th table to the descriptorhandlestart.. So however it has defined it.
+        D3D12_VIEWPORT viewPort = {}; //Viewport defines where we want to render to in the swapchain or the render target, whatever we are rendering to. So if I have a viewport of 500x500 in a 1000x1000 window, it will only render to the other 500x500
+        viewPort.TopLeftX = 0.0f; //Position of X on the left
+        viewPort.TopLeftY = 0.0f; //Position of Y on the top
+        viewPort.Width = static_cast<float>(windowWidth);
+        viewPort.Height = static_cast<float>(windowHeight);
+        viewPort.MinDepth = D3D12_MIN_DEPTH;
+        viewPort.MaxDepth = D3D12_MAX_DEPTH;
+        // Viewport can clip pixels, and so does a rect, but why 2 different types of clipping? Why would I ever use a viewport and also a rect, why ever use a rect? It's because if I change a viewport, the projection would change, so if I don't wanna change the projection, then I would use a scissor clipping through a rect. Imagine rotating a screen, if u wanna adjust stuff, then change viewport, if u just wanna cut stuff, change rect.
+        D3D12_RECT rect = {};
+        rect.left = 0;
+        rect.top = 0;
+        rect.right = windowWidth;
+        rect.bottom = windowHeight;
+        d3D.commandLists[RENDER]->RSSetViewports(1, &viewPort);
+        d3D.commandLists[RENDER]->RSSetScissorRects(1, &rect);
+        // Resource barrier is used when we want to use the same resource (say a texture) to write and read both, and in that case, the applicaiton will tell the GPU that this resource is in a write-ready state or read-ready state,and the GPU will wait for the transition if it's trying to read and the resource is in write-ready state. Now, since our pipeline cannot actually read the render texture, we are going to change state from 'present' meaning, to present to the swapchain, to render target, and vice-versa.
+        D3D12_RESOURCE_BARRIER bbBarrierRender = {}; // Describes a resource barrier (transition in resource use).
+        bbBarrierRender.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; //Transition of a set of subreosuces between different usages. The caller must specify the before and after usages of the subresources.
+        bbBarrierRender.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+        D3D12_RESOURCE_TRANSITION_BARRIER bbTransition = {}; //Describes the transition of subresources between different usages.
+        bbTransition.pResource = resource.texture2Ds[renderTextureOffset].Get(); //First it's the render texture for firstpass.
+        bbTransition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES; //Transition all subresources at the same time when transitioning state of a resource.
+        bbTransition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        bbTransition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        bbBarrierRender.Transition = bbTransition;
+        d3D.commandLists[RENDER]->ResourceBarrier(1, &bbBarrierRender);//A resource barrier is a command you insert into a command list to inform the GPU driver that a resource (like a texture or buffer) is about to be used in a different way than before. This helps the GPU synchronize access to that resource and avoid hazards such as reading while writing or using stale data.
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = resource.descriptorHeaps[RTV_DH]->GetCPUDescriptorHandleForHeapStart();
+        UINT rtvDescriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        handle.ptr = backbufferPtr;
+        handle.ptr += 2 * rtvDescriptorIncrementSize; //Can do it right now because I make the G buffer as soon as I make back buffers.
+        const float clearColor[4] { 0.0f, 0.0f, 0.0f, 1.0f };
+        d3D.commandLists[RENDER]->ClearRenderTargetView(handle, clearColor,
+                                                        0, //Number of RECTs to clear.
+                                                        nullptr //Rects to clear, basically we can clear only a certain rect of the RTV if we want to.
+                                                        );
+        d3D.commandLists[RENDER]->OMSetRenderTargets(1, &handle, FALSE, nullptr);
+        //Nullptr and false since no depth/stencil.
+        d3D.commandLists[RENDER]->OMSetRenderTargets(1, &handle, FALSE, nullptr);
+        d3D.commandLists[RENDER]->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        d3D.commandLists[RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[0]);
+        d3D.commandLists[RENDER]->DrawInstanced(3, 1, 0, 0);
+
+        D3D12_RESOURCE_BARRIER bbBarrierRead = {};
+        bbBarrierRead.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+        bbBarrierRead.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        bbTransition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        bbTransition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        bbBarrierRead.Transition = bbTransition;
+
+        d3D.commandLists[RENDER]->ResourceBarrier(1, &bbBarrierRead);
+        d3D.commandLists[RENDER]->SetPipelineState(resource.pipelineStates[psoInfo::PRESENT_PSO].Get());
+        handle.ptr = backbufferPtr + frameIndex * rtvDescriptorIncrementSize;
+        bbTransition.pResource = resource.texture2Ds[renderTextureOffset - 2 + frameIndex].Get();
+
+        bbTransition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+        bbTransition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        bbBarrierRender.Transition = bbTransition;
+        d3D.commandLists[RENDER]->ResourceBarrier(1, &bbBarrierRender);
+
+        D3D12_RESOURCE_BARRIER bbBarrierPresent = {};
+        bbBarrierPresent.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+        bbBarrierPresent.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        bbTransition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        bbTransition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+        bbBarrierPresent.Transition = bbTransition;
+        d3D.commandLists[RENDER]->OMSetRenderTargets(1, &handle, FALSE, nullptr);
+        d3D.commandLists[RENDER]->ClearRenderTargetView(handle, clearColor, 0, nullptr);
+        d3D.commandLists[RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[1]);
+        d3D.commandLists[RENDER]->IASetIndexBuffer(&resource.ibViews[0]);
+        d3D.commandLists[RENDER]->DrawIndexedInstanced(6, 1, 0, 0, 0);
+        d3D.commandLists[RENDER]->ResourceBarrier(1, &bbBarrierPresent);
+        hr = d3D.commandLists[RENDER]->Close();
+        if(FAILED(hr)){
+            std::cerr<<"Command list close during render-loop failed!";
+            return;
+        }
+        PrintDebugMessages();
+        ID3D12CommandList* cLists[] = { d3D.commandLists[RENDER].Get() };
+        d3D.commandQueue->ExecuteCommandLists(_countof(cLists), cLists);
+
+        hr = d3D.xSwapChain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
+        if(FAILED(hr)){
+            std::cout<<"Swapchain present failed!";
+            return;
+        }
+        hr = d3D.commandQueue->Signal(d3D.fence.Get(), fenceValue); //Will tell the GPU after finishing all the currently queued commands, set the fence to the fence value. It will se the GPU fence value to the fence value variable provided through this method. Basically saying hey commandqueue, after you finish, at this address (given by the fence), put the value (given by fencevalue).
+        if(FAILED(hr)){
+            std::cerr<<"Command queue signal failed!";
+            return;
+        }
+        if (d3D.fence->GetCompletedValue() < fenceValue) { //If the value in the fence object is less than the 'fence value' variable, then that means that the command queue has not finished yet, as the command queue will set the value in the fence object to be fence value after finishing.
+            hr = d3D.fence->SetEventOnCompletion(fenceValue, d3D.fenceEvent); //Basically will say that if the fence's value is the value provided through the 'fencevalue' variable, then fenceevent should be "signaled". "Signaling" in this context means that the fence object will notify a event handle if that happens.
+            if(FAILED(hr)){
+                std::cerr<<"Failed to set fence event on completion in the rendering loop!";
+                return;
+            }
+            WaitForSingleObject(d3D.fenceEvent, INFINITE); //Basically saying that the CPU thread should wait an 'INFINITE' amount of time until event has been signaled. The thread will do other things, and the reason we don't just run an infinite loop instead, checking and seeing if the fence value is reached or not, is because the thread will not be free for other tasks + the memory will keep being accessed over and over again, which may not be bad since cache, but it'll waste the other 64-8 bytes in the cache.
+        }
+        frameIndex = d3D.xSwapChain->GetCurrentBackBufferIndex();
+        fenceValue++;
+        PrintDebugMessages();
+    }
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+    return;
 }
