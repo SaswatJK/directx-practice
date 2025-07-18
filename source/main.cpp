@@ -1,7 +1,7 @@
 #include "../include/utils.h"
 #include "../include/shader.h"
-//#include "../include/graphics.h"
-
+#include "../include/graphics.h"
+/*
 UINT windowWidth = 1000;
 UINT windowHeight = 1000;
 
@@ -23,8 +23,12 @@ void PrintDebugMessages() {
 
     infoQueue->ClearStoredMessages();
 }
-
+*/
 int main(){
+    Engine rayTracingEngine;
+    rayTracingEngine.prepareData();
+    rayTracingEngine.render();
+/*
     SDL_Init(SDL_INIT_VIDEO);
     HRESULT hr;
     Microsoft::WRL::ComPtr<IDXGIFactory7> dxgiFactory; //Latest version of factory, can check feature support, preference of GPU, as well as warp works
@@ -811,4 +815,5 @@ int main(){
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;
+}*/
 }

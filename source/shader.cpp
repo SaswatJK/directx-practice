@@ -50,7 +50,7 @@ Shader::Shader(const std::string& vsPath, const std::string& psPath){
     }
 }
 
-SimpleShaderByteCode Shader::getShaderByteCode(){
+SimpleShaderByteCode Shader::getShaderByteCode() const{
     SimpleShaderByteCode simpleByteCode;
     simpleByteCode.vsByteCode.pShaderBytecode = vsBlob->GetBufferPointer();
     simpleByteCode.vsByteCode.BytecodeLength= vsBlob->GetBufferSize();
