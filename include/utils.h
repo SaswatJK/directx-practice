@@ -87,7 +87,7 @@ typedef struct{
 }Vertex;
 
 //ALl have 8 byte alignment.
-typedef struct {
+typedef struct D3DResourceStruct{
     Microsoft::WRL::ComPtr<ID3D12Heap> heaps[HEAP_COUNT]; //All the heaps that will be used at once.
     Microsoft::WRL::ComPtr<ID3D12Resource> buffers[BUFFER_COUNT]; //All the buffer resources that will be used at once.
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptorHeaps[DH_COUNT]; //All the descriptor heaps that will be used at once.
@@ -100,7 +100,7 @@ typedef struct {
     UINT32 descriptorInHeapCount[DH_COUNT] = {0};
 }D3DResources;
 
-typedef struct { //prefix of x meaning it's dxgi
+typedef struct D3DGlobalStruct{ //prefix of x meaning it's dxgi
     Microsoft::WRL::ComPtr<IDXGIFactory7> xFactory;//Latest version of factory, can check feature support, preference of GPU, as well as warp works
     //Microsoft::WRL::ComPtr<IDXGIFactory2> tempFactory;//I dont' need to put it here.
     Microsoft::WRL::ComPtr<IDXGIAdapter1> xAdapter; //Physical hardware device.
