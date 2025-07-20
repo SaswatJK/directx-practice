@@ -1,19 +1,14 @@
-cbuffer simpleUB : register(b0){
-    float4 color;
-    float4 metallic;
-};
+Texture2D textures[] : register(t0, space0);  //Array of textures (SRV range)
+SamplerState samplers[] : register(s0, space0);  //Array of samplers
 
-struct PSInput{
+struct PSInput {
     float4 position : SV_POSITION;
 };
 
-Texture2D myTexture : register(t1);
-SamplerState mySampler : register(s0);
-
 float4 PSMain(PSInput input) : SV_TARGET {
-    float2 dummyUV = float2(0.1065, 0.7925); // Sample from the center
+    float2 uv = {0.5f, 0.5f};
     float4 finalColor;
-    //finalColor = myTexture.Sample(mySampler, dummyUV);
-    finalColor = color;
+    float4 texColor = textures[1].Sample(samplers[0], uv);
+    finalColor = texColor;
     return finalColor;
 }

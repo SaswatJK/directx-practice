@@ -24,8 +24,8 @@ Shader::Shader(const std::string& vsPath, const std::string& psPath){
                     nullptr, //Array of shader macros! YEP!!
                     nullptr, //Pointer to an id3dinclude for handling include fies. Set to NULL if no #include in the shader.
                     "VSMain", //main functin entry point for shader.
-                    "vs_5_0", //Compiler target
-                    0,
+                    "vs_5_1", //Compiler target
+                    D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES,
                     0,
                     &vsBlob,
                     &errorBlob);
@@ -39,8 +39,8 @@ Shader::Shader(const std::string& vsPath, const std::string& psPath){
                     nullptr, //Array of shader macros! YEP!!
                     nullptr, //Pointer to an id3dinclude for handling include fies. Set to NULL if no #include in the shader.
                     "PSMain", //main functin entry point for shader.
-                    "ps_5_0", //Compiler target
-                    0,
+                    "ps_5_1", //Compiler target
+                    D3DCOMPILE_ENABLE_UNBOUNDED_DESCRIPTOR_TABLES,
                     0,
                     &psBlob,
                     &errorBlob);

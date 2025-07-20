@@ -94,10 +94,10 @@ void Resource::initVertexBuffer(const DataArray &data, const D3DGlobal &d3D, D3D
     return;
     };
     UINT8* mappedData = nullptr;
-    resources.buffers[VERTEX_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(mappedData)); //Mapping the vertex buffer resource to the GPU memory.
+    resources.buffers[VERTEX_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)); //Mapping the vertex buffer resource to the GPU memory.
     UINT8* currentPtr = mappedData; //Current pointer in the GPU.
     for(UINT i = 0; i < data.VSPArray.count; i++){ //Going through each pointer to different vertex arrays.
-        memcpy(mappedData, data.VSPArray.arr[i].data, data.VSPArray.arr[i].size); //Copying each, which is of unique sizes.
+        memcpy(currentPtr, data.VSPArray.arr[i].data, data.VSPArray.arr[i].size); //Copying each, which is of unique sizes.
         currentPtr += data.VSPArray.arr[i].size; //Moving the pointer in the GPU to a new freed space.
     }
     resources.buffers[VERTEX_BUFFER]->Unmap(0, nullptr);
@@ -110,8 +110,8 @@ void Resource::initVertexBuffer(const DataArray &data, const D3DGlobal &d3D, D3D
     for(UINT i = 0; i < data.VSPArray.count; i++){
         vbView.SizeInBytes = data.VSPArray.arr[i].size;
         vbView.BufferLocation = resources.buffers[VERTEX_BUFFER]->GetGPUVirtualAddress() + previousOffset;
-        previousOffset = data.VSPArray.arr[i].size;
-        resources.vbViews.push_back(vbView);
+        previousOffset += data.VSPArray.arr[i].size;
+        resources.vbViews[i] = vbView;
     }
 }
 
@@ -143,10 +143,10 @@ void Resource::initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DR
     return;
     };
     UINT8* mappedData = nullptr;
-    resources.buffers[INDEX_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(mappedData));
+    resources.buffers[INDEX_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
     UINT8* currentPtr = mappedData;
     for(UINT i = 0; i < data.PSPArray.count; i++){
-        memcpy(mappedData, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
+        memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
         currentPtr += data.PSPArray.arr[i].size;
     }
     resources.buffers[INDEX_BUFFER]->Unmap(0, nullptr);
@@ -158,8 +158,8 @@ void Resource::initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DR
     for(UINT i = 0; i < data.PSPArray.count; i++){
         ibView.SizeInBytes = data.PSPArray.arr[i].size;
         ibView.BufferLocation = resources.buffers[INDEX_BUFFER]->GetGPUVirtualAddress() + previousOffset;
-        previousOffset = data.PSPArray.arr[i].size;
-        resources.ibViews.push_back(ibView);
+        previousOffset += data.PSPArray.arr[i].size;
+        resources.ibViews[i] = ibView;
     }
 }
 
@@ -189,10 +189,10 @@ void Resource::initConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D
     return;
     };
     UINT8* mappedData = nullptr;
-    resources.buffers[CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(mappedData));
+    resources.buffers[CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
     UINT8* currentPtr = mappedData;
     for(UINT i = 0; i < data.PSPArray.count; i++){
-        memcpy(mappedData, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
+        memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
         currentPtr += data.PSPArray.arr[i].size;
     }
     resources.buffers[CONSTANT_BUFFER]->Unmap(0, nullptr);
@@ -248,7 +248,13 @@ void Resource::createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, con
     desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     Microsoft::WRL::ComPtr<ID3D12Resource> resource;
     resources.texture2Ds.push_back(resource);
-    HRESULT hr = d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&resources.texture2Ds.back()));
+    D3D12_CLEAR_VALUE optimizedClearValue = {};
+    optimizedClearValue.Format = format;
+    optimizedClearValue.Color[0] = 0.0f;
+    optimizedClearValue.Color[1] = 0.0f;
+    optimizedClearValue.Color[2] = 0.0f;
+    optimizedClearValue.Color[3] = 1.0f;
+    HRESULT hr = d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &optimizedClearValue, IID_PPV_ARGS(&resources.texture2Ds.back()));
     if(FAILED(hr)){
         std::cerr<<"Texture: "<<resources.texture2Ds.size()<<" upload failed!";
         return;
@@ -291,7 +297,7 @@ void Resource::createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, con
     resources.descriptorInHeapCount[SRV_CBV_UAV_DH]++;
 }
 
-void Resource::init2DTexture(void* data, UINT width, UINT height, UINT nrChannels, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources){
+void Resource::init2DTexture(void* data, UINT width, UINT height, UINT nrChannels, DXGI_FORMAT format, UINT fenceValue,const D3DGlobal &d3D, D3DResources &resources){
     //Thinking if I should upload all textures at once and just create different views?? I think so cause I will hav eto do it regardless.
     D3D12_RESOURCE_DESC desc = {};
     DXGI_SAMPLE_DESC sampleDesc = {}; //Multisampling, mandatory to fill even for resources that don't make sense
@@ -337,7 +343,7 @@ void Resource::init2DTexture(void* data, UINT width, UINT height, UINT nrChannel
     desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
     desc.Width = totalBytes;
-    hr = d3D.device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ //Reason this and not copy_source state is because all buffers in the upload heap have to be in the generic read state during creation.
+    hr = d3D.device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COMMON//Reason this and not copy_source state is because all buffers in the upload heap have to be in the generic read state during creation.
     , nullptr, IID_PPV_ARGS(&tempUploadBuffer));
     if(FAILED(hr)){
         std::cerr<<"The temporary upload buffer for texture "<<resources.texture2Ds.size()<<" createion failed!";
@@ -362,8 +368,6 @@ void Resource::init2DTexture(void* data, UINT width, UINT height, UINT nrChannel
     copySrcLocation.PlacedFootprint = footprint;
     copySrcLocation.SubresourceIndex = 0;
 
-    UINT fenceValue = 1;
-
     D3D12_RESOURCE_BARRIER copyToPSResourceBarrier = {}; //For changing from copy state to pixel shader resource state.
     copyToPSResourceBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     copyToPSResourceBarrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
@@ -373,9 +377,22 @@ void Resource::init2DTexture(void* data, UINT width, UINT height, UINT nrChannel
     copyToPSTransitionBarrier.pResource = resources.texture2Ds.back().Get();
     copyToPSTransitionBarrier.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     copyToPSResourceBarrier.Transition = copyToPSTransitionBarrier;
+    hr = d3D.commandLists[RENDER]->Close();
+    hr = d3D.commandAllocators[PRIMARY]->Reset();
+    if(FAILED(hr)){
+            std::cerr<<"Command allocator is reset before copying the texture resource, and it couldn't reset!";
+            return;
+        }
+    hr = d3D.commandLists[RENDER]->Reset(d3D.commandAllocators[PRIMARY].Get(), nullptr);
+    if(FAILED(hr)){
+        std::cerr<<"Command List is reset before copying the texture resource, and it couldn't reset!";
+        return;
+    }
     d3D.commandLists[RENDER]->CopyTextureRegion(&copyDestLocation, 0, 0, 0, &copySrcLocation, nullptr);
     d3D.commandLists[RENDER]->ResourceBarrier(1, &copyToPSResourceBarrier);
     d3D.commandLists[RENDER]->Close();
+    ID3D12CommandList* lists[] = { d3D.commandLists[RENDER].Get() };
+    d3D.commandQueue->ExecuteCommandLists(_countof(lists), lists);
     hr = d3D.commandQueue->Signal(d3D.fence.Get(), fenceValue); //Will tell the GPU after finishing all the currently queued commands, set the fence to the fence value. It will se the GPU fence value to the fence value variable provided through this method. Basically saying hey commandqueue, after you finish, at this address (given by the fence), put the value (given by fencevalue).
     if(FAILED(hr)){
         std::cerr<<"Command queue signal failed before the rendering loop!";
@@ -413,7 +430,7 @@ void Resource::init2DTexture(void* data, UINT width, UINT height, UINT nrChannel
     UINT currentDescriptorHeapOffset = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
     handle.ptr += currentDescriptorHeapOffset;
     d3D.device->CreateShaderResourceView(resources.texture2Ds.back().Get(), &texView, handle);
-    tempUploadBuffer->Release();
+    //tempUploadBuffer->Release();
     resources.descriptorInHeapCount[SRV_CBV_UAV_DH]++;
 }
 
@@ -498,7 +515,7 @@ void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResourc
     // The root signature is the definition of an arbitrarily arranged collection of descriptor tables (including their layout), root constants and root descriptors. It basically describes the layout of resource used by the pipeline.
     //'Serializing' a root signature means converting a root signature description from the desc structures, to a GPU readable state. We need to serialize into blobs the root signature, which talks about textures and buffers and where to find them and what not, and shaders, so the GPU can understand it.
     //This description is a CPU-side data structure describing how our shaders will access resources. To create a GPU-usable root signature (ID3D12RootSignature), our must serialize this description into a binary format.
-    HRESULT hr = D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signatureBlob, &error);
+    HRESULT hr = D3D12SerializeRootSignature(&rsDesc, D3D_ROOT_SIGNATURE_VERSION_1_0, &signatureBlob, &error);
     if (FAILED(hr)) {
         std::cerr<<"Serialising root signature failure";
         return;
@@ -520,6 +537,7 @@ void PipelineState::createGraphicsPSO(psoInfo info, const Shader &shader, DXGI_F
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     //Will be using the same dxgi_sample_desc that I created for swap chain.
     psoDesc.SampleDesc.Count = 1;
+    psoDesc.SampleDesc.Quality = 0;
     //We will not be filling in StreamOutput or STREAM_OUTPUT_DESC because it's an output description for vertex shader output to a buffer, which is different from a FBO, where the fragment/pixel shader writes to a buffer.
     //D3D12_STREAM_OUTPUT_DESC streamOutputDesc = {}; I won't have a stream output, so I don't need to fill this
     D3D12_BLEND_DESC opaqueBlendDesc = {}; //Blending is done between background, and 'foreground' objects.
@@ -553,7 +571,7 @@ void PipelineState::createGraphicsPSO(psoInfo info, const Shader &shader, DXGI_F
     simpleRasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF; //Read the GPU Gems algorithm on conservative rasterization. It's absolutely beautiful. Basically making shit fatter for better inteserction tests.
     //D3D12_DEPTH_STENCIL_DESC dsDesc = {}; Not usign thise because we're not doign depth or stencil testing.
     D3D12_INPUT_LAYOUT_DESC simpleInputLayoutDesc = {};
-    D3D12_INPUT_ELEMENT_DESC simpleInputElementDesc[] = {
+    D3D12_INPUT_ELEMENT_DESC simpleInputElementDesc[] = {{
     "POSITION", //Semantic Name
     0, //Semantic index
     DXGI_FORMAT_R32G32B32_FLOAT, //format of the input, since we're using 4 byte floats in the CPU, we might as well use that in the GPU.
@@ -561,7 +579,7 @@ void PipelineState::createGraphicsPSO(psoInfo info, const Shader &shader, DXGI_F
     0, //Offset in bytes to this element from the start of the vertex.
     D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, //A value that identifies the input data class for a single input slot.
     0 //The number of instances to draw using the same per-instance data before advancing in the buffer by one element. If it's per vertex data, then set this value to 0.
-    };
+    }};
     simpleInputLayoutDesc.pInputElementDescs = simpleInputElementDesc;
     simpleInputLayoutDesc.NumElements = 1; //Only vertex right now.
     psoDesc.DepthStencilState.DepthEnable = FALSE;
@@ -576,6 +594,10 @@ void PipelineState::createGraphicsPSO(psoInfo info, const Shader &shader, DXGI_F
     psoDesc.NodeMask = 0; //Remember just like the 'NodeMask' in the createrootsignature method, this is for multiGPU systems where we are using node masks to choose between GPUs.
     psoDesc.pRootSignature = resources.rootSignature.Get();
     SimpleShaderByteCode byteCode = shader.getShaderByteCode();
+    if (byteCode.vsByteCode.pShaderBytecode == nullptr || byteCode.vsByteCode.BytecodeLength == 0) {
+    std::cerr << "Invalid vertex shader bytecode\n";
+    return;
+}
     psoDesc.VS = byteCode.vsByteCode;
     psoDesc.PS = byteCode.psByteCode;
     HRESULT hr = d3D.device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&resources.pipelineStates[info]));
@@ -583,5 +605,4 @@ void PipelineState::createGraphicsPSO(psoInfo info, const Shader &shader, DXGI_F
         std::cerr<<"Creation of graphics pipeline state object: "<<info<<" has failed";
         return;
     }
-
 }

@@ -16,7 +16,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D12InfoQueue> infoQueue;
     void PrintDebugMessages();
     UINT renderTextureOffset;
-    UINT backbufferPtr;
+    UINT backBufferOffset;
+    UINT fenceValue = 1;
 //    SDL_WINDOW* window = nullptr;
 public:
     Engine();
