@@ -101,8 +101,8 @@ typedef struct D3DResourceStruct{
 }D3DResources;
 
 typedef struct D3DGlobalStruct{ //prefix of x meaning it's dxgi
-    Microsoft::WRL::ComPtr<IDXGIFactory7> xFactory;//Latest version of factory, can check feature support, preference of GPU, as well as warp works
-    //Microsoft::WRL::ComPtr<IDXGIFactory2> tempFactory;//I dont' need to put it here.
+    Microsoft::WRL::ComPtr<IDXGIFactory7> xFactory; //Latest version of factory, can check feature support, preference of GPU, as well as warp works
+    //Microsoft::WRL::ComPtr<IDXGIFactory2> tempFactory; //I dont' need to put it here.
     Microsoft::WRL::ComPtr<IDXGIAdapter1> xAdapter; //Physical hardware device.
     Microsoft::WRL::ComPtr<ID3D12Device10> device; //This allows for newer methods like CreateComittedResource3, can learn about it in docs, or in this same code underneath at the first use of CreateComittedResource.
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue;

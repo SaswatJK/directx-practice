@@ -53,8 +53,7 @@ Engine::Engine(){
     {
         debugController->EnableDebugLayer();
         Microsoft::WRL::ComPtr<ID3D12Debug1> debugController1;
-        if (SUCCEEDED(debugController.As(&debugController1)))
-            debugController1->SetEnableGPUBasedValidation(TRUE);
+        //if (SUCCEEDED(debugController.As(&debugController1))) debugController1->SetEnableGPUBasedValidation(TRUE);
     }
     for (uint32_t adapterIndex = 0; true; ++adapterIndex) {
         if (d3D.xFactory->EnumAdapters1(adapterIndex, &d3D.xAdapter) == DXGI_ERROR_NOT_FOUND) {
@@ -68,12 +67,12 @@ Engine::Engine(){
           continue;
         }
 
-        if (SUCCEEDED(D3D12CreateDevice(d3D.xAdapter.Get(), D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), nullptr))) {
+        if (SUCCEEDED(D3D12CreateDevice(d3D.xAdapter.Get(), D3D_FEATURE_LEVEL_12_2, __uuidof(ID3D12Device), nullptr))) {
           break;
         }
       }
 
-        hr = (D3D12CreateDevice(d3D.xAdapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&d3D.device)));
+        hr = (D3D12CreateDevice(d3D.xAdapter.Get(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&d3D.device)));
 
         if(!d3D.device){
             std::cerr<<"Direct3D 12 compatible device was not found!";
@@ -108,7 +107,6 @@ Engine::Engine(){
         nullptr, //full sreen desc for fullscreen, and not a windowed swapchain
         nullptr, //If restrict some content
         &tempSwapChain //A pointer to a variable that receives a pointer to the IDXGISwapChain interface for the swap chain that CreateSwapChain creates, that's why I don't need to use the get method for the ComPtr
-
     );
     if(FAILED(hr)){
         std::cerr<<"SwapChain creation failed!";
@@ -130,7 +128,7 @@ Engine::Engine(){
         return;
     }
 
-    //Everytime a commandlist is reset, it will allocate a block of memory from the commandallocator, it will pile up. We can reset the command allocator, but if we do so, then we shouldn't use the command list and execute it with the previously allocated memory.
+    //Everytime a commandlist is reset, it will allocate a block of memory from the commandallocator, it will pile up. We can reset the command allocator, but if we do so, then we shouldn't use the command list and execute it with the previously allocated memory. So, if we are to reset command allocator, do it before reseting command lists, as the newly reset command list will point to the correct memory block, however in between the resetting of the command allocator (which should be done before the resetting of the list), the command should not be executed.
     hr = d3D.device->CreateCommandList(0,//Node mask, GPU(s)
                                        D3D12_COMMAND_LIST_TYPE_DIRECT,
                                        d3D.commandAllocators[PRIMARY].Get(),
@@ -143,7 +141,7 @@ Engine::Engine(){
     //d3D.commandLists[RENDER]->Close();
     //Synchronization. Why it's important. So the GPU and CPU are both working simulatenously, however, we don't want one to overtake the other, we don't want the CPU to overtake and change the PSO before the frame has been completed by the GPU and cause errors, and we don't want the GPU to start making frames before updating uniforms and stuff by the CPU.
     //A fence is one of the most simple synchronization objects. It exists in both the CPU and the GPU. It has an internal integer counter, and can trigger events on either the GPU or the GPU when the counter reached a certain value, that we can specify.
-    //This can be done to trigger an event on the CPU when a command allocator's commands have been executed fully, or we can have the GPU wait while the CPu is completing a certain operation first, or we can get the command queues (if multiple exists), on the GPU to wait upon one another.
+    //This can be done to trigger an event on the CPU when a command allocator's commands have been executed fully, or we can have the GPU wait while the CPU is completing a certain operation first, or we can get the command queues (if multiple exists), on the GPU to wait upon one another.
     hr = d3D.device->CreateFence(0, //Initial fence value
                                   D3D12_FENCE_FLAG_NONE, //Flag for if shared or not. We would want shared fence for syncrhonization after multi-threading, or we can also have a flag for cross-adapter fences, we would want multiple fences for multithreading. Different threads in the CPU build different command lists and command allocators, then different fences syncrhonize the GPU as well while doing execution of said allocators.
                                   IID_PPV_ARGS(&d3D.fence));
@@ -187,7 +185,7 @@ void Engine::prepareData(){
     unsigned char* textureData = stbi_load(texturePath.c_str(), &textureWidth, &textureHeight, &nrChannels, 0);
     if (textureData == nullptr)
         std::cout<<"Texture data can't be opened in memory!";
-    VertexSizePair triAndQuad[2];
+    VertexSizePair triAndQuad[2]; //Makes them congiguous.
     triAndQuad[0].data = triangle;
     triAndQuad[0].size = sizeof(triangle);
     triAndQuad[1].data = quad;
@@ -205,6 +203,7 @@ void Engine::prepareData(){
     //Creating upload Heap.
     Heap::createHeap(0, heapInfo::UPLOAD_HEAP, d3D, resource);
     //PrintDebugMessages();
+    //Creating a descriptor heap for the srvs and cbvs.
     Heap::createDescriptorHeap(dhInfo::SRV_CBV_UAV_DH, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
     //PrintDebugMessages();
     //Creating the vertex and index buffer.
@@ -267,10 +266,10 @@ void Engine::render(){
             return;
         }
         d3D.commandLists[RENDER]->SetGraphicsRootSignature(resource.rootSignature.Get());
-        // RTV heaps that we use for presenting to the screen, and not for rendering to a frame buffer or for re-use by the shader, do not need to be set with SetDescriptorHeaps, they are instead set by OMSetRenderTarget. If I wanted to reuse those render targets, then I should create a frame buffer and while creating the rtv in the RTVHeapDesc, I should have used the flag for ALLOW_RENDER_TARGET. Now I can re-use the same RTVs for both Framebuffer and for the swapchain, btu then the swapchain format would need to be the same as the RTV format, and we will lose lots of information with only 1 byte for each color channel.
+        // RTV heaps that we use for presenting to the screen, and not for rendering to a frame buffer or for re-use by the shader, do not need to be set with SetDescriptorHeaps, they are instead set by OMSetRenderTarget. If I wanted to reuse those render targets, then I should create a frame buffer and while creating the rtv in the RTVHeapDesc, I should have used the flag for ALLOW_RENDER_TARGET. Now I can re-use the same RTVs for both Framebuffer and for the swapchain, but then the swapchain format would need to be the same as the RTV format, and we will lose lots of information with only 1 byte for each color channel.
         ID3D12DescriptorHeap* dHeaps[] = { resource.descriptorHeaps[dhInfo::SRV_CBV_UAV_DH].Get(), resource.descriptorHeaps[dhInfo::SAMPLER_DH].Get() }; //No RTV here because they're not shader visible.
         d3D.commandLists[RENDER]->SetDescriptorHeaps(_countof(dHeaps), dHeaps);
-        d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(0, //Root parameter index, base register + index (b0, b1, and dependingly...) in the shader. If range says 5 descriptors, then it will basically start from that base register range and form the uniform heap pointer, and then allocate 5 consecutive descriptors.
+        d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(0, //Root parameter index, base register + index (b0, b1, and dependingly...) in the shader. If range says 5 descriptors, then it will basically start from that base register range and from the uniform heap pointer, and then allocate 5 consecutive descriptors.
                                                                 resource.descriptorHeaps[SRV_CBV_UAV_DH]->GetGPUDescriptorHandleForHeapStart());
         d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(2, resource.descriptorHeaps[SAMPLER_DH]->GetGPUDescriptorHandleForHeapStart());
         //Each 'slot' in the root parameter can hold anyting from one descriptor to descriptor tables. Each descriptor table can have multiple ranges. Where a range describes a contiguous block of descriptors of same type. Set a certain table. So this binds the 0'th table to the descriptorhandlestart.. So however it has defined it.
@@ -302,7 +301,7 @@ void Engine::render(){
         d3D.commandLists[RENDER]->ResourceBarrier(1, &bbBarrierRender);//A resource barrier is a command you insert into a command list to inform the GPU driver that a resource (like a texture or buffer) is about to be used in a different way than before. This helps the GPU synchronize access to that resource and avoid hazards such as reading while writing or using stale data.
         D3D12_CPU_DESCRIPTOR_HANDLE handle = resource.descriptorHeaps[RTV_DH]->GetCPUDescriptorHandleForHeapStart();
         UINT rtvDescriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-        handle.ptr += (backBufferOffset + 2) * rtvDescriptorIncrementSize; //Can do it right now because I make the G buffer as soon as I make back buffers.
+        handle.ptr += (backBufferOffset + 2) * rtvDescriptorIncrementSize; //Can do it right now because I make the G buffer as soon as I make back buffers. Pointing to the G buffer instead of one of the two back buffers.
         const float clearColor[4] { 0.0f, 0.0f, 0.0f, 1.0f };
         d3D.commandLists[RENDER]->ClearRenderTargetView(handle, clearColor,
                                                         0, //Number of RECTs to clear.
@@ -326,7 +325,7 @@ void Engine::render(){
         d3D.commandLists[RENDER]->ResourceBarrier(1, &bbBarrierRead);
         d3D.commandLists[RENDER]->SetPipelineState(resource.pipelineStates[psoInfo::PRESENT_PSO].Get());
         handle = resource.descriptorHeaps[RTV_DH]->GetCPUDescriptorHandleForHeapStart();
-        handle.ptr += (backBufferOffset + frameIndex) * rtvDescriptorIncrementSize;
+        handle.ptr += (backBufferOffset + frameIndex) * rtvDescriptorIncrementSize; //Pointing to one of the back buffers instead of the G buffer to render to.
         bbTransition.pResource = resource.texture2Ds[renderTextureOffset - 2 + frameIndex].Get();
         bbTransition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
         bbTransition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;

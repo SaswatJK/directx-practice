@@ -3,12 +3,12 @@ SamplerState samplers[] : register(s0, space0);  //Array of samplers
 
 struct PSInput {
     float4 position : SV_POSITION;
+    float2 texcoord : TEXCOORD0;
 };
 
 float4 PSMain(PSInput input) : SV_TARGET {
-    float2 uv = {0.5f, 0.5f};
     float4 finalColor;
-    float4 texColor = textures[1].Sample(samplers[0], uv);
+    float4 texColor = textures[1].Sample(samplers[0], input.texcoord);
     finalColor = texColor;
     return finalColor;
 }

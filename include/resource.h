@@ -12,7 +12,7 @@ typedef struct{
 }PtrSizePair;
 
 typedef struct{
-    Vertex* data; //Pointer to a vector of vertex array.
+    Vertex* data; //Pointer to a vector/array of vertex array.
     UINT size; //Size in bytes, of the vertex vertex array, for each view.
 }VertexSizePair;
 
@@ -31,6 +31,8 @@ namespace Heap{
     void createHeap(UINT size, heapInfo heap, const D3DGlobal &d3D, D3DResources &resources);
     void createDescriptorHeap(dhInfo dh, D3D12_DESCRIPTOR_HEAP_TYPE type, D3D12_DESCRIPTOR_HEAP_FLAGS flag, const D3DGlobal &d3D, D3DResources &resources);
 };
+
+//I should probably rename for easier searches. Meaning, for initVertexBuffer etc, I shoudl call it vertexBufferInit instead so that it can be easier for autocomplete and easier to search. The only problem is that with a camel case, it won't look as good xD.
 
 namespace Resource{
     //I am so confused, I wasted so many hours thinking of a data agnostinc way of uplaoding to buffers but I know what I will upload in the vertex and constant buffer tho... I guess it'll be useful for constant and intermmediate bufferse?

@@ -1,6 +1,6 @@
 #include "../include/utils.h"
-#include "../include/shader.h"
 #include "../include/graphics.h"
+#include "../include/shader.h"
 
 int main(){
     Engine rayTracingEngine;

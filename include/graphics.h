@@ -10,13 +10,13 @@ private:
     UINT windowHeight = 1000;
     SDL_Window* window;
     HRESULT hr;
-    HWND hwnd;
+    HWND hwnd; //Window handler.
     D3DGlobal d3D;
     D3DResources resource;
     Microsoft::WRL::ComPtr<ID3D12InfoQueue> infoQueue;
     void PrintDebugMessages();
-    UINT renderTextureOffset;
-    UINT backBufferOffset;
+    UINT renderTextureOffset; //Offset in the texture2D array of 'd3d12 resource', which offset the render texture is in.
+    UINT backBufferOffset; //Offset in the descriptorheaps for rtvs, where the descriptorheap of the the back buffer start. Atleast that's how these 2 are used right now. I forgot my own design decision.
     UINT fenceValue = 1;
 //    SDL_WINDOW* window = nullptr;
 public:

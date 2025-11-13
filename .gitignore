@@ -8,3 +8,4 @@ build/
 lib/
 resources/
 source/oldmain.cpp
+CMakeLists.txt

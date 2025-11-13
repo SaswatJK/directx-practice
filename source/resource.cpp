@@ -86,7 +86,7 @@ void Resource::initVertexBuffer(const DataArray &data, const D3DGlobal &d3D, D3D
     //I wanted to use ID3D12Resource2 but it's so unimportant that these guys didn't even document it properly, there's no links to new features or to the old interface it has inherited from LMFAO. CreateCommittedResource3 uses layout rather than states for barriers and stuff, which should give more control for the memory of both GPU, CPU, and the access of either/or memory from either/or physical hardware (host or device), so does CreatePlacedResource2, while CreatePlacedResource1 looks for desc_1 rather than desc for resources.
     HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[UPLOAD_HEAP].Get(),
                                                   resources.heapOffsets[UPLOAD_HEAP], &desc,
-                                                  D3D12_RESOURCE_STATE_GENERIC_READ, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
+                                                  D3D12_RESOURCE_STATE_COMMON, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
                                                   nullptr, //optimized clear value
                                                   IID_PPV_ARGS(&resources.buffers[VERTEX_BUFFER]));
     if(FAILED(hr)){
@@ -135,7 +135,7 @@ void Resource::initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DR
     desc.Width = dataSize;
     HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[UPLOAD_HEAP].Get(),
                                                   resources.heapOffsets[UPLOAD_HEAP], &desc,
-                                                  D3D12_RESOURCE_STATE_GENERIC_READ, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
+                                                  D3D12_RESOURCE_STATE_COMMON, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
                                                   nullptr, //optimized clear value
                                                   IID_PPV_ARGS(&resources.buffers[INDEX_BUFFER]));
     if(FAILED(hr)){
@@ -181,7 +181,7 @@ void Resource::initConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D
     desc.Width = dataSize;
     HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[UPLOAD_HEAP].Get(),
                                                   resources.heapOffsets[UPLOAD_HEAP], &desc,
-                                                  D3D12_RESOURCE_STATE_GENERIC_READ, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
+                                                  D3D12_RESOURCE_STATE_COMMON, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
                                                   nullptr, //optimized clear value
                                                   IID_PPV_ARGS(&resources.buffers[CONSTANT_BUFFER]));
     if(FAILED(hr)){
@@ -393,7 +393,7 @@ void Resource::init2DTexture(void* data, UINT width, UINT height, UINT nrChannel
     d3D.commandLists[RENDER]->Close();
     ID3D12CommandList* lists[] = { d3D.commandLists[RENDER].Get() };
     d3D.commandQueue->ExecuteCommandLists(_countof(lists), lists);
-    hr = d3D.commandQueue->Signal(d3D.fence.Get(), fenceValue); //Will tell the GPU after finishing all the currently queued commands, set the fence to the fence value. It will se the GPU fence value to the fence value variable provided through this method. Basically saying hey commandqueue, after you finish, at this address (given by the fence), put the value (given by fencevalue).
+    hr = d3D.commandQueue->Signal(d3D.fence.Get(), fenceValue); //Will tell the GPU after finishing all the currently queued commands, set the fence to the fence value. It will set the GPU fence value to the fence value variable provided through this method. Basically saying hey commandqueue, after you finish, at this address (given by the fence), put the value (given by fencevalue).
     if(FAILED(hr)){
         std::cerr<<"Command queue signal failed before the rendering loop!";
         return;
