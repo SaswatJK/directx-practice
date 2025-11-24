@@ -66,11 +66,11 @@ typedef enum {
 }dhInfo;
 
 typedef enum {
-    SRV = 0,
-    CBV,
-    RTV,
-    UAV,
-    SAMPLER,
+    VIEW_SRV = 0,
+    VIEW_CBV,
+    VIEW_RTV,
+    VIEW_UAV,
+    VIEW_SAMPLER,
     VIEW_COUNT
 }viewInfo;
 
@@ -98,6 +98,7 @@ typedef struct D3DResourceStruct{
     std::vector<D3D12_INDEX_BUFFER_VIEW> ibViews;
     UINT32 heapOffsets[HEAP_COUNT] = {0};
     UINT32 descriptorInHeapCount[DH_COUNT] = {0};
+    UINT32 eachDescriptorCount[VIEW_COUNT] = {0};
 }D3DResources;
 
 typedef struct D3DGlobalStruct{ //prefix of x meaning it's dxgi

@@ -208,8 +208,21 @@ void Resource::initConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D
                                          //Simplest way to say it, we are getting the location of the first descriptor of many (if there are more than 1), in the descriptor heap. Right now it's the start of the descriptor heap, now imagine we wanted another descriptor of the same type in the heap, to create the 'view', we would have to increment this handle to the next descriptor 'slot' in the descriptor heap. When we call functions like CreateShaderResourceView or CreateConstantBufferView, we pass a CPU descriptor handle to specify exactly where in the heap the new descriptor should be written. Later, when binding descriptors to the GPU pipeline, we use GPU descriptor handles to tell the GPU where to find these descriptors during execution.
                                          //It's because the descriptor heap is in the CPU accessible memory while what it's ponting to is in the GPU, which is why descriptors/views use gpuvirtualaddress for pointing to a buffer that is committed to the GPU memory, but we use cpuhandle for the memory for the descriptors themselves.
                                          );
+    resources.eachDescriptorCount[VIEW_CBV] = resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
     resources.descriptorInHeapCount[SRV_CBV_UAV_DH]++;
 }
+
+void Resource::updateConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources){
+    UINT8* mappedData = nullptr;
+    resources.buffers[CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+    UINT8* currentPtr = mappedData;
+    for(UINT i = 0; i < data.PSPArray.count; i++){
+        memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
+        currentPtr += data.PSPArray.arr[i].size;
+    }
+    resources.buffers[CONSTANT_BUFFER]->Unmap(0, nullptr);
+}
+
 
 void Resource::createBackBuffers(UINT width, UINT height, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources){
     Microsoft::WRL::ComPtr<ID3D12Resource> resource0;
@@ -227,6 +240,7 @@ void Resource::createBackBuffers(UINT width, UINT height, DXGI_FORMAT format, co
                                            nullptr, //We don't need to make a render_target_view_desc, it will inherit the importnat values like size and format and fill in defaults
                                            handle);
         handle.ptr += descriptorIncrementSize;
+        resources.eachDescriptorCount[VIEW_RTV] = resources.descriptorInHeapCount[RTV_DH];
         resources.descriptorInHeapCount[RTV_DH]++;
     }
 }
@@ -294,6 +308,7 @@ void Resource::createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, con
     currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
     handle.ptr += currentDescriptorHeapOffset;
     d3D.device->CreateShaderResourceView(resources.texture2Ds.back().Get(), &srvDesc, handle);
+    resources.eachDescriptorCount[VIEW_SRV] = resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
     resources.descriptorInHeapCount[SRV_CBV_UAV_DH]++;
 }
 
@@ -431,6 +446,7 @@ void Resource::init2DTexture(void* data, UINT width, UINT height, UINT nrChannel
     handle.ptr += currentDescriptorHeapOffset;
     d3D.device->CreateShaderResourceView(resources.texture2Ds.back().Get(), &texView, handle);
     //tempUploadBuffer->Release();
+    resources.eachDescriptorCount[VIEW_SRV] = resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
     resources.descriptorInHeapCount[SRV_CBV_UAV_DH]++;
 }
 
@@ -464,9 +480,9 @@ void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResourc
 
     D3D12_DESCRIPTOR_RANGE cbvRange = {};
     cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    cbvRange.NumDescriptors = 1;
+    cbvRange.NumDescriptors = 100;
     cbvRange.BaseShaderRegister = 0;
-    cbvRange.RegisterSpace = 1; // Different register space to avoid conflicts
+    cbvRange.RegisterSpace = 0; // Different register space to avoid conflicts
     cbvRange.OffsetInDescriptorsFromTableStart = 0;
 
     D3D12_DESCRIPTOR_RANGE samplerRange = {};

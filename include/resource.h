@@ -39,6 +39,7 @@ namespace Resource{
     void initVertexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources); //width should be the sum of the data.
     void initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);
     void initConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);
+    void updateConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);
     void createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources); //For like RTVs for frame buffers.
     void createBackBuffers(UINT width, UINT height, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources); //For like the 2 back buffers.
     void init2DTexture(void* data, UINT width, UINT height, UINT nrChannels, DXGI_FORMAT format, UINT fenceValue, const D3DGlobal &d3D, D3DResources &resources); //Copy stuff from intermeddiate buffer/upload heap to default heap. The question is, should I use createpalcedresource for the intermeddiate case or createcommittedreosurce
