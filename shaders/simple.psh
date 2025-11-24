@@ -1,6 +1,14 @@
 Texture2D textures[] : register(t0, space0);  //Array of textures (SRV range)
 SamplerState samplers[] : register(s0, space0);  //Array of samplers
 
+struct MyConstants{
+    float4 color;
+    float4 metallic;
+    float4 cameraPos;
+};
+
+ConstantBuffer <MyConstants> cBuffers[] : register(b0, space0);
+
 struct PSInput {
     float4 position : SV_POSITION;
     float2 texcoord : TEXCOORD0;
@@ -9,6 +17,6 @@ struct PSInput {
 float4 PSMain(PSInput input) : SV_TARGET {
     float4 finalColor;
     float4 texColor = textures[1].Sample(samplers[0], input.texcoord);
-    finalColor = texColor;
+    finalColor = cBuffers[0].cameraPos;
     return finalColor;
 }
