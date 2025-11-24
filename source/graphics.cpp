@@ -8,12 +8,18 @@
 #include "shader.h"
 #include "utils.h"
 #include <combaseapi.h>
+#include <cstdlib>
 #include <dxgi.h>
 #include <dxgi1_5.h>
-#include <filesystem>
-#include <intsafe.h>
-#include <minwindef.h>
 #include <wrl/client.h>
+#include <windows.h>
+
+typedef struct{
+    float x;
+    float y;
+    float z;
+    float w;
+}Vec4;
 
 DXGI_SAMPLE_DESC sampleDesc = {
     1, //Number of multisamples per pixel
@@ -178,8 +184,15 @@ void Engine::prepareData(){
         0, 1, 2, //top left triangle
         2, 3, 0 //bottom right triangle
     };
-    float color[4] = { 0.0f, 0.5f, 0.5f, 1.0f };
-    float metallic[4] = { 1.0f, 0.2f, 0.0f, 1.0f };
+
+    constantData = (char*)malloc(256);
+    Vec4* color = (Vec4*)constantData;
+    *color = {0.0f, 0.5f, 0.5f, 1.0f};
+    Vec4* metallic = color + 1;
+    *metallic = {1.0f, 0.2f, 0.0f, 1.0f};
+    Vec4* cameraPos = metallic + 1;
+    *cameraPos = {0.0f, 0.0f, -1.0f, 1.0f};
+
     int textureWidth, textureHeight, nrChannels;
     std::string texturePath = "../resources/practicetexture.png";
     unsigned char* textureData = stbi_load(texturePath.c_str(), &textureWidth, &textureHeight, &nrChannels, 0);
@@ -199,7 +212,16 @@ void Engine::prepareData(){
     DataArray indexData = {};
     indexData.PSPArray.arr = &quadIn;
     indexData.PSPArray.count = 1;
-
+    DataArray perFrameStuff =  {};
+    PtrSizePair colorMettalicCamera[3];
+    colorMettalicCamera[0].data = color;
+    colorMettalicCamera[0].size = sizeof(Vec4);
+    colorMettalicCamera[1].data = metallic;
+    colorMettalicCamera[1].size = sizeof(Vec4);
+    colorMettalicCamera[2].data = cameraPos;
+    colorMettalicCamera[2].size = sizeof(Vec4);
+    perFrameStuff.PSPArray.arr = colorMettalicCamera;
+    perFrameStuff.PSPArray.count = 3;
     //Creating upload Heap.
     Heap::createHeap(0, heapInfo::UPLOAD_HEAP, d3D, resource);
     //PrintDebugMessages();
@@ -227,14 +249,15 @@ void Engine::prepareData(){
     Heap::createDescriptorHeap(dhInfo::SAMPLER_DH, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
     Resource::createSimpleSampler(d3D, resource);
     Resource::init2DTexture(textureData, textureWidth, textureHeight, nrChannels, DXGI_FORMAT_R8G8B8A8_UNORM, fenceValue, d3D, resource);
+    Resource::initConstantBuffer(perFrameStuff, d3D, resource);
     //PrintDebugMessages();
     fenceValue++;
     //Creating a bindless root singature.
     RootSignature::createBindlessRootSignature(d3D, resource);
     //Creating the first pipeline state.
-    Shader renderShader("../shaders/simple.vert","../shaders/simple.pixel");
+    Shader renderShader("../shaders/simple.vsh","../shaders/simple.psh");
     PipelineState::createGraphicsPSO(psoInfo::RENDER_PSO, renderShader, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
-    Shader quadShader("../shaders/quad.vert", "../shaders/quad.pixel");
+    Shader quadShader("../shaders/quad.vsh", "../shaders/quad.psh");
     PipelineState::createGraphicsPSO(psoInfo::PRESENT_PSO, quadShader, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
     PrintDebugMessages();
 }
@@ -255,6 +278,25 @@ void Engine::render(){
                 running = false;
                 break;
             }
+
+        if (GetAsyncKeyState('Q') & 0x8000){
+            Vec4* color = (Vec4*)constantData;
+            Vec4* metallic = color + 1;
+            Vec4* cameraPos = metallic + 1;
+            *cameraPos = {cameraPos->x, cameraPos->y + 0.001f, cameraPos->z, cameraPos->w};
+            PtrSizePair colorMettalicCamera[3];
+            colorMettalicCamera[0].data = color;
+            colorMettalicCamera[0].size = sizeof(Vec4);
+            colorMettalicCamera[1].data = metallic;
+            colorMettalicCamera[1].size = sizeof(Vec4);
+            colorMettalicCamera[2].data = cameraPos;
+            colorMettalicCamera[2].size = sizeof(Vec4);
+            DataArray perFrameStuff =  {};
+            perFrameStuff.PSPArray.arr = colorMettalicCamera;
+            perFrameStuff.PSPArray.count = 3;
+            Resource::updateConstantBuffer(perFrameStuff, d3D, resource);
+        }
+
         hr = d3D.commandAllocators[cmdAllocator::PRIMARY]->Reset();
         if(FAILED(hr)){
             std::cerr<<"Command allocator is reset during the start of each frame, and it couldn't reset!";
@@ -271,6 +313,10 @@ void Engine::render(){
         d3D.commandLists[RENDER]->SetDescriptorHeaps(_countof(dHeaps), dHeaps);
         d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(0, //Root parameter index, base register + index (b0, b1, and dependingly...) in the shader. If range says 5 descriptors, then it will basically start from that base register range and from the uniform heap pointer, and then allocate 5 consecutive descriptors.
                                                                 resource.descriptorHeaps[SRV_CBV_UAV_DH]->GetGPUDescriptorHandleForHeapStart());
+        resource.descriptorHeaps[0]->GetGPUDescriptorHandleForHeapStart();
+        D3D12_GPU_DESCRIPTOR_HANDLE gHandle = resource.descriptorHeaps[SRV_CBV_UAV_DH]->GetGPUDescriptorHandleForHeapStart();
+        gHandle.ptr += (UINT64)(d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * resource.eachDescriptorCount[VIEW_CBV]);
+        d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(1, gHandle);
         d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(2, resource.descriptorHeaps[SAMPLER_DH]->GetGPUDescriptorHandleForHeapStart());
         //Each 'slot' in the root parameter can hold anyting from one descriptor to descriptor tables. Each descriptor table can have multiple ranges. Where a range describes a contiguous block of descriptors of same type. Set a certain table. So this binds the 0'th table to the descriptorhandlestart.. So however it has defined it.
         D3D12_VIEWPORT viewPort = {}; //Viewport defines where we want to render to in the swapchain or the render target, whatever we are rendering to. So if I have a viewport of 500x500 in a 1000x1000 window, it will only render to the other 500x500
