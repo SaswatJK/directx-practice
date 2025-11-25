@@ -1,7 +1,9 @@
 #pragma once
 #include "SDL3/SDL_video.h"
 #include "utils.h"
+#include "importer.h"
 #include "resource.h"
+#include <cstdint>
 #include <wrl/client.h>
 
 class Engine{
@@ -19,6 +21,7 @@ private:
     UINT backBufferOffset; //Offset in the descriptorheaps for rtvs, where the descriptorheap of the the back buffer start. Atleast that's how these 2 are used right now. I forgot my own design decision.
     UINT fenceValue = 1;
     char* constantData;
+    std::vector<uint32_t> modelIndices;
 //    SDL_WINDOW* window = nullptr;
 public:
     Engine();

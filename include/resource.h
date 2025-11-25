@@ -27,6 +27,9 @@ typedef union {
     } VSPArray;
 } DataArray;
 
+UINT getPSPDataSize(const DataArray &data);
+UINT getVSPDataSize(const DataArray &data);
+
 namespace Heap{
     void createHeap(UINT size, heapInfo heap, const D3DGlobal &d3D, D3DResources &resources);
     void createDescriptorHeap(dhInfo dh, D3D12_DESCRIPTOR_HEAP_TYPE type, D3D12_DESCRIPTOR_HEAP_FLAGS flag, const D3DGlobal &d3D, D3DResources &resources);

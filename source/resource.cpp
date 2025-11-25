@@ -25,14 +25,31 @@ D3D12_HEAP_PROPERTIES defaultHeapProperties = {
     1
 };
 
+UINT getVSPDataSize(const DataArray &data){
+    UINT dataSize;
+    for(UINT i = 0; i < data.VSPArray.count; i++) //Looping through the 'size' member of the struct.
+        dataSize += data.VSPArray.arr[i].size; //Adding the size to get the size for the heap.
+    return dataSize;
+}
+
+UINT getPSPDataSize(const DataArray &data){
+    UINT dataSize;
+    for(UINT i = 0; i < data.PSPArray.count; i++)
+        dataSize += data.PSPArray.arr[i].size;
+    return dataSize;
+}
+
 void Heap::createHeap(UINT size, heapInfo heap, const D3DGlobal &d3D, D3DResources &resources){
     UINT heapSize = size;
+    UINT heaps = heapSize/65536 + 1;
     D3D12_HEAP_DESC desc;
     switch(heap) {
         case UPLOAD_HEAP:
             desc.Properties = uploadHeapProperties;
             if(heapSize < 65536 * 4) // The 4 bfufers that will be placed in the upload heap
                 heapSize = 65536 * 4;
+            else
+                heapSize = 65536 * heaps;
             break;
         case DEFAULT_HEAP:
             desc.Properties = defaultHeapProperties;
@@ -79,8 +96,7 @@ void Resource::initVertexBuffer(const DataArray &data, const D3DGlobal &d3D, D3D
     desc.SampleDesc = sampleDesc;
     desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
-    for(UINT i = 0; i < data.VSPArray.count; i++) //Looping through the 'size' member of the struct.
-        dataSize += data.VSPArray.arr[i].size; //Adding the size to get the size for the heap.
+    dataSize = getVSPDataSize(data);
     desc.Width = dataSize;
     //Committed resource is the easiest way to create resource since we don't need to do heap management ourselves.
     //I wanted to use ID3D12Resource2 but it's so unimportant that these guys didn't even document it properly, there's no links to new features or to the old interface it has inherited from LMFAO. CreateCommittedResource3 uses layout rather than states for barriers and stuff, which should give more control for the memory of both GPU, CPU, and the access of either/or memory from either/or physical hardware (host or device), so does CreatePlacedResource2, while CreatePlacedResource1 looks for desc_1 rather than desc for resources.
@@ -101,7 +117,8 @@ void Resource::initVertexBuffer(const DataArray &data, const D3DGlobal &d3D, D3D
         currentPtr += data.VSPArray.arr[i].size; //Moving the pointer in the GPU to a new freed space.
     }
     resources.buffers[VERTEX_BUFFER]->Unmap(0, nullptr);
-    resources.heapOffsets[UPLOAD_HEAP] += 65536;
+    uint32_t newOffset = desc.Width / 65536  + 1;
+    resources.heapOffsets[UPLOAD_HEAP] += (newOffset * 65536);
     //we craete views here as well yipee.
     D3D12_VERTEX_BUFFER_VIEW vbView = {}; //I have to store these views as well... HMM
     vbView.StrideInBytes = sizeof(Vertex);
@@ -130,8 +147,7 @@ void Resource::initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DR
     desc.SampleDesc = sampleDesc;
     desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
-    for(UINT i = 0; i < data.PSPArray.count; i++)
-        dataSize += data.PSPArray.arr[i].size;
+    dataSize = getPSPDataSize(data);
     desc.Width = dataSize;
     HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[UPLOAD_HEAP].Get(),
                                                   resources.heapOffsets[UPLOAD_HEAP], &desc,
@@ -150,7 +166,8 @@ void Resource::initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DR
         currentPtr += data.PSPArray.arr[i].size;
     }
     resources.buffers[INDEX_BUFFER]->Unmap(0, nullptr);
-    resources.heapOffsets[UPLOAD_HEAP] += 65536;
+    uint32_t newOffset = desc.Width / 65536  + 1;
+    resources.heapOffsets[UPLOAD_HEAP] += (newOffset * 65536);
     D3D12_INDEX_BUFFER_VIEW ibView = {};
     ibView.Format = DXGI_FORMAT_R32_UINT;
     UINT previousOffset = 0;

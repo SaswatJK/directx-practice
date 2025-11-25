@@ -1,5 +1,6 @@
 #include "../include/graphics.h"
 #include "../include/resource.h"
+#include "../include/importer.h"
 #include "D3D12/d3d12.h"
 #include "D3D12/d3dcommon.h"
 #include "D3D12/dxgiformat.h"
@@ -203,20 +204,27 @@ void Engine::prepareData(){
     unsigned char* textureData = stbi_load(texturePath.c_str(), &textureWidth, &textureHeight, &nrChannels, 0);
     if (textureData == nullptr)
         std::cout<<"Texture data can't be opened in memory!";
-    VertexSizePair triAndQuad[2]; //Makes them congiguous.
+    VertexSizePair triAndQuad[3]; //Makes them congiguous.
+    Model diabloModel;
+    diabloModel.loadModel("C:/Users/broia/Downloads/diablo3Pose.obj");
     triAndQuad[0].data = triangleVertices;
     triAndQuad[0].size = sizeof(triangleVertices);
     triAndQuad[1].data = quadVertices;
     triAndQuad[1].size = sizeof(quadVertices);
+    triAndQuad[2].data = diabloModel.vertices.data();
+    triAndQuad[2].size = diabloModel.vertices.size() * sizeof(Vertex);
     DataArray vertexData = {};
     vertexData.VSPArray.arr = triAndQuad;
-    vertexData.VSPArray.count = 2;
-    PtrSizePair quadIn;
-    quadIn.data = quadIndices;
-    quadIn.size = sizeof(quadIndices);
+    vertexData.VSPArray.count = 3;
+    PtrSizePair modelQuadIn[2];
+    modelQuadIn[0].data = diabloModel.meshes.data();
+    modelQuadIn[0].size = diabloModel.meshes.size() * sizeof(Mesh);
+    modelIndices.push_back(diabloModel.meshes.size() * 3);
+    modelQuadIn[1].data = quadIndices;
+    modelQuadIn[1].size = sizeof(quadIndices);
     DataArray indexData = {};
-    indexData.PSPArray.arr = &quadIn;
-    indexData.PSPArray.count = 1;
+    indexData.PSPArray.arr = modelQuadIn;
+    indexData.PSPArray.count = 2;
     DataArray perFrameStuff =  {};
     PtrSizePair colorMettalicCamera[3];
     colorMettalicCamera[0].data = color;
@@ -227,8 +235,11 @@ void Engine::prepareData(){
     colorMettalicCamera[2].size = sizeof(Vec4);
     perFrameStuff.PSPArray.arr = colorMettalicCamera;
     perFrameStuff.PSPArray.count = 3;
+    UINT totalSize = getVSPDataSize(vertexData);
+    totalSize += getPSPDataSize(indexData);
+    totalSize += getPSPDataSize(perFrameStuff);
     //Creating upload Heap.
-    Heap::createHeap(0, heapInfo::UPLOAD_HEAP, d3D, resource);
+    Heap::createHeap(totalSize, heapInfo::UPLOAD_HEAP, d3D, resource);
     //PrintDebugMessages();
     //Creating a descriptor heap for the srvs and cbvs.
     Heap::createDescriptorHeap(dhInfo::SRV_CBV_UAV_DH, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
@@ -361,9 +372,12 @@ void Engine::render(){
         //Nullptr and false since no depth/stencil.
         d3D.commandLists[RENDER]->OMSetRenderTargets(1, &handle, FALSE, nullptr);
         d3D.commandLists[RENDER]->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        d3D.commandLists[RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[0]);
+        //d3D.commandLists[RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[0]);
+        d3D.commandLists[RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[2]);
+        d3D.commandLists[RENDER]->IASetIndexBuffer(&resource.ibViews[0]);
+        d3D.commandLists[RENDER]->DrawIndexedInstanced(modelIndices[0], 1, 0, 0, 0);
         //PrintDebugMessages();
-        d3D.commandLists[RENDER]->DrawInstanced(3, 1, 0, 0);
+        //d3D.commandLists[RENDER]->DrawInstanced(3, 1, 0, 0);
 
         //PrintDebugMessages();
         D3D12_RESOURCE_BARRIER bbBarrierRead = {};
@@ -393,7 +407,7 @@ void Engine::render(){
         d3D.commandLists[RENDER]->OMSetRenderTargets(1, &handle, FALSE, nullptr);
         d3D.commandLists[RENDER]->ClearRenderTargetView(handle, clearColor, 0, nullptr);
         d3D.commandLists[RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[1]);
-        d3D.commandLists[RENDER]->IASetIndexBuffer(&resource.ibViews[0]);
+        d3D.commandLists[RENDER]->IASetIndexBuffer(&resource.ibViews[1]);
         d3D.commandLists[RENDER]->DrawIndexedInstanced(6, 1, 0, 0, 0);
         d3D.commandLists[RENDER]->ResourceBarrier(1, &bbBarrierPresent);
         hr = d3D.commandLists[RENDER]->Close();
