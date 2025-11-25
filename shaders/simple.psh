@@ -11,12 +11,16 @@ ConstantBuffer <MyConstants> cBuffers[] : register(b0, space0);
 
 struct PSInput {
     float4 position : SV_POSITION;
+    float4 normal : NORMAL0;
     float2 texcoord : TEXCOORD0;
 };
 
 float4 PSMain(PSInput input) : SV_TARGET {
     float4 finalColor;
     float4 texColor = textures[1].Sample(samplers[0], input.texcoord);
-    finalColor = cBuffers[0].cameraPos;
-    return finalColor;
+    //finalColor = cBuffers[0].color;
+    finalColor = float4(1.0, 1.0, 1.0, 1.0);
+    //return finalColor;
+    return input.normal;
+
 }
