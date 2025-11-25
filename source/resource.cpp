@@ -590,14 +590,16 @@ void PipelineState::createGraphicsPSO(psoInfo info, const Shader &shader, DXGI_F
     D3D12_INPUT_ELEMENT_DESC simpleInputElementDesc[] = {{
     "POSITION", //Semantic Name
     0, //Semantic index
-    DXGI_FORMAT_R32G32B32_FLOAT, //format of the input, since we're using 4 byte floats in the CPU, we might as well use that in the GPU.
+    DXGI_FORMAT_R32G32B32A32_FLOAT, //format of the input, since we're using 4 byte floats in the CPU, we might as well use that in the GPU.
     0, //Input slot. The IA stage has n input slots, which are designed to accommodate up to n vertex buffers that provide input data. Each vertex buffer must be assigned to a different slot
     0, //Offset in bytes to this element from the start of the vertex.
     D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, //A value that identifies the input data class for a single input slot.
     0 //The number of instances to draw using the same per-instance data before advancing in the buffer by one element. If it's per vertex data, then set this value to 0.
-    }};
+    },
+    {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+    {"NORMAL", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
     simpleInputLayoutDesc.pInputElementDescs = simpleInputElementDesc;
-    simpleInputLayoutDesc.NumElements = 1; //Only vertex right now.
+    simpleInputLayoutDesc.NumElements = _countof(simpleInputElementDesc); //Only vertex right now.
     psoDesc.DepthStencilState.DepthEnable = FALSE;
     psoDesc.DepthStencilState.StencilEnable = FALSE;
     psoDesc.SampleMask = UINT_MAX; //The sample mask for the blend state. Use in Multisampling to selectively enable or disable certain/specific samples.
