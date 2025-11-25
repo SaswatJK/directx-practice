@@ -83,8 +83,25 @@ typedef enum {
 }rtvInfo;
 
 typedef struct{
-    float pos[3];
+    float x;
+    float y;
+    float z;
+    float w;
+}Vec4;
+
+typedef struct{
+    Vec4 row1;
+    Vec4 row2;
+    Vec4 row3;
+    Vec4 row4;
+}Mat4;
+
+typedef struct{
+    Vec4 position;
+    Vec4 color;
+    Vec4 normal;
 }Vertex;
+
 
 //ALl have 8 byte alignment.
 typedef struct D3DResourceStruct{

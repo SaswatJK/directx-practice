@@ -14,13 +14,6 @@
 #include <wrl/client.h>
 #include <windows.h>
 
-typedef struct{
-    float x;
-    float y;
-    float z;
-    float w;
-}Vec4;
-
 DXGI_SAMPLE_DESC sampleDesc = {
     1, //Number of multisamples per pixel
     0 //The image quality level. The higher the quality, the lower the performance. The valid range is between zero and one less than the level returned by ID3D10Device::CheckMultisampleQualityLevels for Direct3D 10 or ID3D11Device::CheckMultisampleQualityLevels for Direct3D 11.
@@ -167,18 +160,30 @@ Engine::Engine(){
 };
 
 void Engine::prepareData(){
-    Vertex triangle[3] = {
-        {{0.0f, 0.5f, -0.5f}},
-        {{0.5f, -0.5f, 0.5f}},
-        {{-0.5, -0.5f, 0.0f}}
-    };
+    Vertex triangleVertices[3] = {
+        {{0.0f, 0.5f, -0.5f, 1.0f},
+         {1.0f, 1.0f, 1.0f, 1.0f},
+         {1.0f, 1.0f, 1.0f, 1.0f}},
+        {{0.5f, -0.5f, 0.5f, 1.0f},
+         {1.0f, 1.0f, 1.0f, 1.0f},
+         {1.0f, 1.0f, 1.0f, 1.0f}},
+        {{-0.5, -0.5f, 0.0f, 1.0f},
+         {1.0f, 1.0f, 1.0f, 1.0f},
+         {1.0f, 1.0f, 1.0f, 1.0f}}};
 
-    Vertex quad[4] = {
-        {{-1.0f, -1.0f, 0.0f}}, //bottom left
-        {{-1.0f, 1.0f, 0.0f}}, //Top left
-        {{1.0f, 1.0f, 0.0f}}, //Top right
-        {{1.0f, -1.0f, 0.0f}} //Bottom right
-    };
+    Vertex quadVertices[4] = {
+        {{-1.0f, -1.0f, 0.0f, 1.0f}, //bottom left
+         {1.0f, 1.0f, 1.0f, 1.0f},
+         {1.0f, 1.0f, 1.0f, 1.0f}},
+        {{-1.0f, 1.0f, 0.0f, 1.0f}, //Top left
+         {1.0f, 1.0f, 1.0f, 1.0f},
+         {1.0f, 1.0f, 1.0f, 1.0f}},
+        {{1.0f, 1.0f, 0.0f, 1.0f}, //Top right
+         {1.0f, 1.0f, 1.0f, 1.0f},
+         {1.0f, 1.0f, 1.0f, 1.0f}},
+        {{1.0f, -1.0f, 0.0f, 1.0f}, //Bottom right
+         {1.0f, 1.0f, 1.0f, 1.0f},
+         {1.0f, 1.0f, 1.0f, 1.0f}}};
 
     unsigned int quadIndices[6] = {
         0, 1, 2, //top left triangle
@@ -199,10 +204,10 @@ void Engine::prepareData(){
     if (textureData == nullptr)
         std::cout<<"Texture data can't be opened in memory!";
     VertexSizePair triAndQuad[2]; //Makes them congiguous.
-    triAndQuad[0].data = triangle;
-    triAndQuad[0].size = sizeof(triangle);
-    triAndQuad[1].data = quad;
-    triAndQuad[1].size = sizeof(quad);
+    triAndQuad[0].data = triangleVertices;
+    triAndQuad[0].size = sizeof(triangleVertices);
+    triAndQuad[1].data = quadVertices;
+    triAndQuad[1].size = sizeof(quadVertices);
     DataArray vertexData = {};
     vertexData.VSPArray.arr = triAndQuad;
     vertexData.VSPArray.count = 2;
