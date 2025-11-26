@@ -4,7 +4,18 @@ SamplerState samplers[] : register(s0, space0);  //Array of samplers
 struct MyConstants{
     float4 color;
     float4 metallic;
-    float4 cameraPos;
+    float4 viewMatR0;    // View matrix row 0
+    float4 viewMatR1;    // View matrix row 1
+    float4 viewMatR2;    // View matrix row 2
+    float4 viewMatR3;    // View matrix row 3
+    float4 projMatR0;    // Projection matrix row 0
+    float4 projMatR1;    // Projection matrix row 1
+    float4 projMatR2;    // Projection matrix row 2
+    float4 projMatR3;    // Projection matrix row 3
+    float4 modelMatR0;
+    float4 modelMatR1;
+    float4 modelMatR2;
+    float4 modelMatR3;
 };
 
 ConstantBuffer <MyConstants> cBuffers[] : register(b0, space0);
@@ -20,7 +31,7 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float4 texColor = textures[1].Sample(samplers[0], input.texcoord);
     //finalColor = cBuffers[0].color;
     finalColor = float4(1.0, 1.0, 1.0, 1.0);
-    //return finalColor;
-    return input.normal;
+    return finalColor;
+    //return input.normal;
 
 }
