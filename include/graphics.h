@@ -3,6 +3,7 @@
 #include "utils.h"
 #include "importer.h"
 #include "resource.h"
+#include "camera.h"
 #include <cstdint>
 #include <wrl/client.h>
 
@@ -22,6 +23,7 @@ private:
     UINT fenceValue = 1;
     char* constantData;
     std::vector<uint32_t> modelIndices;
+    Camera* camera;
 //    SDL_WINDOW* window = nullptr;
 public:
     Engine();

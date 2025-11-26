@@ -6,14 +6,18 @@
 #include "D3D12/dxgiformat.h"
 #include "SDL3/SDL_events.h"
 #include "SDL3/SDL_video.h"
+#include "camera.h"
+#include "glm/ext/matrix_float4x4.hpp"
 #include "shader.h"
 #include "utils.h"
 #include <combaseapi.h>
 #include <cstdlib>
+#include <cstring>
 #include <dxgi.h>
 #include <dxgi1_5.h>
 #include <wrl/client.h>
 #include <windows.h>
+#include <glm/gtc/matrix_access.hpp>
 
 DXGI_SAMPLE_DESC sampleDesc = {
     1, //Number of multisamples per pixel
@@ -161,6 +165,11 @@ Engine::Engine(){
 };
 
 void Engine::prepareData(){
+    glm::vec4 cameraPos = {1.0f, 0.0f, 20.0f, 1.0f};
+    glm::vec4 cameraDir = {0.0f, 0.0f, -1.0f, 1.0f};
+    glm::vec4 cameraUp = {0.0f, 1.0f, 0.0f, 1.0f};
+    camera = new Camera(cameraPos, cameraDir, cameraUp); //Using new instead of malloc cause it's a class with it's constructors and what not.
+
     Vertex triangleVertices[3] = {
         {{0.0f, 0.5f, -0.5f, 1.0f},
          {1.0f, 1.0f, 1.0f, 1.0f},
@@ -192,13 +201,22 @@ void Engine::prepareData(){
     };
 
     constantData = (char*)malloc(256);
-    Vec4* color = (Vec4*)constantData;
+    memset(constantData, 0, 256);
+    glm::vec4* color = (glm::vec4*)constantData;
     *color = {0.0f, 0.5f, 0.5f, 1.0f};
-    Vec4* metallic = color + 1;
+    glm::vec4* metallic = color + 1;
     *metallic = {1.0f, 0.2f, 0.0f, 1.0f};
-    Vec4* cameraPos = metallic + 1;
-    *cameraPos = {0.0f, 0.0f, -1.0f, 1.0f};
+    glm::mat4 tempViewMat4 = camera->getMatView();
+    glm::mat4 tempProjMat4 = camera->getMatProj();
+    metallic += 1;
+    //Give the mat4 as 4 vec4s
+    glm::mat4* viewMatR = (glm::mat4*)metallic;
+    *viewMatR = tempViewMat4;
+    glm::mat4* projMatR = viewMatR + 1;
+    *projMatR = tempProjMat4;
 
+    //*currentDrawIndex = {0, 0.0f, 0.0f, 0.0f};
+    //glm::vec4* 
     int textureWidth, textureHeight, nrChannels;
     std::string texturePath = "../resources/practicetexture.png";
     unsigned char* textureData = stbi_load(texturePath.c_str(), &textureWidth, &textureHeight, &nrChannels, 0);
@@ -206,7 +224,11 @@ void Engine::prepareData(){
         std::cout<<"Texture data can't be opened in memory!";
     VertexSizePair triAndQuad[3]; //Makes them congiguous.
     Model diabloModel;
-    diabloModel.loadModel("C:/Users/broia/Downloads/diablo3Pose.obj");
+    diabloModel.loadModel("C:/Users/broia/Downloads/cube.obj", glm::vec3(0, 0, -10), glm::vec3(0, 0, 0), glm::vec3(0.5, 0.5, 0.5));
+    glm::mat4 tempModelMat4 = diabloModel.modelMatrix;
+    glm::mat4* modelMatR = projMatR + 1;
+    *modelMatR = tempModelMat4;
+
     triAndQuad[0].data = triangleVertices;
     triAndQuad[0].size = sizeof(triangleVertices);
     triAndQuad[1].data = quadVertices;
@@ -225,19 +247,23 @@ void Engine::prepareData(){
     DataArray indexData = {};
     indexData.PSPArray.arr = modelQuadIn;
     indexData.PSPArray.count = 2;
-    DataArray perFrameStuff =  {};
-    PtrSizePair colorMettalicCamera[3];
-    colorMettalicCamera[0].data = color;
-    colorMettalicCamera[0].size = sizeof(Vec4);
-    colorMettalicCamera[1].data = metallic;
-    colorMettalicCamera[1].size = sizeof(Vec4);
-    colorMettalicCamera[2].data = cameraPos;
-    colorMettalicCamera[2].size = sizeof(Vec4);
-    perFrameStuff.PSPArray.arr = colorMettalicCamera;
-    perFrameStuff.PSPArray.count = 3;
+    DataArray constantBufferData =  {};
+    PtrSizePair constantBufferPairs[5];
+    constantBufferPairs[0].data = color;
+    constantBufferPairs[0].size = sizeof(glm::vec4);
+    constantBufferPairs[1].data = metallic;
+    constantBufferPairs[1].size = sizeof(glm::vec4);
+    constantBufferPairs[2].data = viewMatR;
+    constantBufferPairs[2].size = sizeof(glm::mat4);
+    constantBufferPairs[3].data = projMatR;
+    constantBufferPairs[3].size = sizeof(glm::mat4);
+    constantBufferPairs[4].data = modelMatR;
+    constantBufferPairs[4].size = sizeof(glm::mat4);
+    constantBufferData.PSPArray.arr = constantBufferPairs;
+    constantBufferData.PSPArray.count = 5;
     UINT totalSize = getVSPDataSize(vertexData);
     totalSize += getPSPDataSize(indexData);
-    totalSize += getPSPDataSize(perFrameStuff);
+    totalSize += getPSPDataSize(constantBufferData);
     //Creating upload Heap.
     Heap::createHeap(totalSize, heapInfo::UPLOAD_HEAP, d3D, resource);
     //PrintDebugMessages();
@@ -265,7 +291,7 @@ void Engine::prepareData(){
     Heap::createDescriptorHeap(dhInfo::SAMPLER_DH, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
     Resource::createSimpleSampler(d3D, resource);
     Resource::init2DTexture(textureData, textureWidth, textureHeight, nrChannels, DXGI_FORMAT_R8G8B8A8_UNORM, fenceValue, d3D, resource);
-    Resource::initConstantBuffer(perFrameStuff, d3D, resource);
+    Resource::initConstantBuffer(constantBufferData, d3D, resource);
     //PrintDebugMessages();
     fenceValue++;
     //Creating a bindless root singature.
@@ -294,25 +320,27 @@ void Engine::render(){
                 running = false;
                 break;
             }
+        static bool wasDown = false;
+        SHORT state = GetAsyncKeyState('A');
+        bool isDown = (state & 0x8000);
 
-        if (GetAsyncKeyState('Q') & 0x8000){
-            Vec4* color = (Vec4*)constantData;
-            Vec4* metallic = color + 1;
-            Vec4* cameraPos = metallic + 1;
-            *cameraPos = {cameraPos->x, cameraPos->y + 0.001f, cameraPos->z, cameraPos->w};
-            PtrSizePair colorMettalicCamera[3];
-            colorMettalicCamera[0].data = color;
-            colorMettalicCamera[0].size = sizeof(Vec4);
-            colorMettalicCamera[1].data = metallic;
-            colorMettalicCamera[1].size = sizeof(Vec4);
-            colorMettalicCamera[2].data = cameraPos;
-            colorMettalicCamera[2].size = sizeof(Vec4);
-            DataArray perFrameStuff =  {};
-            perFrameStuff.PSPArray.arr = colorMettalicCamera;
-            perFrameStuff.PSPArray.count = 3;
-            Resource::updateConstantBuffer(perFrameStuff, d3D, resource);
+        if (isDown && !wasDown){
+            DataArray constantBufferData = {};
+            PtrSizePair constantBufferPairs[1];
+            glm::vec4* start = (glm::vec4*)constantData;
+            start += 2;
+            glm::mat4* viewMat = (glm::mat4*)start;
+            camera->updateCamera(glm::vec4 (-0.5, 0, 0, 0), glm::vec4(0, 0, 0, 0) , glm::vec4 (0, 0, 0, 0));
+            *viewMat = camera->getMatView();
+            glm::mat4* projMat = viewMat + 1;
+            *projMat = camera->getMatProj();
+            constantBufferPairs->data = constantData;
+            constantBufferPairs->size = 256;
+            constantBufferData.PSPArray.arr = constantBufferPairs;
+            constantBufferData.PSPArray.count = 1;
+            Resource::updateConstantBuffer(constantBufferData, d3D, resource);
         }
-
+        wasDown = isDown;
         hr = d3D.commandAllocators[cmdAllocator::PRIMARY]->Reset();
         if(FAILED(hr)){
             std::cerr<<"Command allocator is reset during the start of each frame, and it couldn't reset!";
