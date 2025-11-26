@@ -21,7 +21,11 @@
 #include "SDL3/SDL_events.h"
 #include "SDL3/SDL_oldnames.h"
 #include "SDL3/SDL_video.h"
+#include "glm/ext/vector_float4.hpp"
 #include "stb_image.h"
+#include <glm/common.hpp>
+#include <glm/ext.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 typedef enum {
     PRIMARY = 0,
@@ -77,23 +81,9 @@ typedef enum {
 }rtvInfo;
 
 typedef struct{
-    float x;
-    float y;
-    float z;
-    float w;
-}Vec4;
-
-typedef struct{
-    Vec4 row1;
-    Vec4 row2;
-    Vec4 row3;
-    Vec4 row4;
-}Mat4;
-
-typedef struct{
-    Vec4 position;
-    Vec4 color;
-    Vec4 normal;
+    glm::vec4 position;
+    glm::vec4 color;
+    glm::vec4 normal;
 }Vertex;
 
 

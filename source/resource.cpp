@@ -26,14 +26,14 @@ D3D12_HEAP_PROPERTIES defaultHeapProperties = {
 };
 
 UINT getVSPDataSize(const DataArray &data){
-    UINT dataSize;
+    UINT dataSize = 0;
     for(UINT i = 0; i < data.VSPArray.count; i++) //Looping through the 'size' member of the struct.
         dataSize += data.VSPArray.arr[i].size; //Adding the size to get the size for the heap.
     return dataSize;
 }
 
 UINT getPSPDataSize(const DataArray &data){
-    UINT dataSize;
+    UINT dataSize = 0;
     for(UINT i = 0; i < data.PSPArray.count; i++)
         dataSize += data.PSPArray.arr[i].size;
     return dataSize;
@@ -212,6 +212,12 @@ void Resource::initConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D
         memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
         currentPtr += data.PSPArray.arr[i].size;
     }
+    float* f = reinterpret_cast<float*>(mappedData);
+    for (int i = 0; i < 16*4; ++i) {
+        if (i % 4 == 0) printf("\nvec%d: ", i/4);
+        printf("%f ", f[i]);
+    }
+    printf("\n");
     resources.buffers[CONSTANT_BUFFER]->Unmap(0, nullptr);
     resources.heapOffsets[UPLOAD_HEAP] += 65536;
     D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {}; //We are assuming right now that we only have one constant buffer view..
@@ -237,6 +243,12 @@ void Resource::updateConstantBuffer(const DataArray &data, const D3DGlobal &d3D,
         memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
         currentPtr += data.PSPArray.arr[i].size;
     }
+    float* f = reinterpret_cast<float*>(mappedData);
+    for (int i = 0; i < 16*4; ++i) {
+        if (i % 4 == 0) printf("\nvec%d: ", i/4);
+        printf("%f ", f[i]);
+    }
+    printf("\n");
     resources.buffers[CONSTANT_BUFFER]->Unmap(0, nullptr);
 }
 
