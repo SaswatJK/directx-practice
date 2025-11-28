@@ -7,6 +7,7 @@
 #include "SDL3/SDL_events.h"
 #include "SDL3/SDL_video.h"
 #include "camera.h"
+#include "glm/detail/qualifier.hpp"
 #include "glm/ext/matrix_float4x4.hpp"
 #include "shader.h"
 #include "utils.h"
@@ -15,6 +16,7 @@
 #include <cstring>
 #include <dxgi.h>
 #include <dxgi1_5.h>
+#include <wincrypt.h>
 #include <wrl/client.h>
 #include <windows.h>
 #include <glm/gtc/matrix_access.hpp>
@@ -165,7 +167,7 @@ Engine::Engine(){
 };
 
 void Engine::prepareData(){
-    glm::vec4 cameraPos = {1.0f, 0.0f, 20.0f, 1.0f};
+    glm::vec4 cameraPos = {1.0f, 0.0f, 10.0f, 1.0f};
     glm::vec4 cameraDir = {0.0f, 0.0f, -1.0f, 1.0f};
     glm::vec4 cameraUp = {0.0f, 1.0f, 0.0f, 1.0f};
     camera = new Camera(cameraPos, cameraDir, cameraUp); //Using new instead of malloc cause it's a class with it's constructors and what not.
@@ -199,7 +201,7 @@ void Engine::prepareData(){
         0, 1, 2, //top left triangle
         2, 3, 0 //bottom right triangle
     };
-
+    //NOTE: I should send this to other functions like camera functins and model functions so they can just slot their matrix in easily.
     constantData = (char*)malloc(256);
     memset(constantData, 0, 256);
     glm::vec4* color = (glm::vec4*)constantData;
@@ -224,10 +226,13 @@ void Engine::prepareData(){
         std::cout<<"Texture data can't be opened in memory!";
     VertexSizePair triAndQuad[3]; //Makes them congiguous.
     Model diabloModel;
-    diabloModel.loadModel("C:/Users/broia/Downloads/cube.obj", glm::vec3(0, 0, -10), glm::vec3(0, 0, 0), glm::vec3(0.5, 0.5, 0.5));
+    diabloModel.loadModel("C:/Users/broia/Downloads/diablo3Pose.obj", glm::vec3(0, 0, -2), glm::vec3(0, 0, 0), glm::vec3(2.5, 2.5, 2.5));
     glm::mat4 tempModelMat4 = diabloModel.modelMatrix;
     glm::mat4* modelMatR = projMatR + 1;
     *modelMatR = tempModelMat4;
+    modelMatR += 1;
+    glm::vec4* viewPos = (glm::vec4*)modelMatR;
+    *viewPos = camera->getVFront();
 
     triAndQuad[0].data = triangleVertices;
     triAndQuad[0].size = sizeof(triangleVertices);
@@ -247,20 +252,13 @@ void Engine::prepareData(){
     DataArray indexData = {};
     indexData.PSPArray.arr = modelQuadIn;
     indexData.PSPArray.count = 2;
+    //NOTE: Make constant buffer bigger through better offsetting and whatnot.
     DataArray constantBufferData =  {};
-    PtrSizePair constantBufferPairs[5];
-    constantBufferPairs[0].data = color;
-    constantBufferPairs[0].size = sizeof(glm::vec4);
-    constantBufferPairs[1].data = metallic;
-    constantBufferPairs[1].size = sizeof(glm::vec4);
-    constantBufferPairs[2].data = viewMatR;
-    constantBufferPairs[2].size = sizeof(glm::mat4);
-    constantBufferPairs[3].data = projMatR;
-    constantBufferPairs[3].size = sizeof(glm::mat4);
-    constantBufferPairs[4].data = modelMatR;
-    constantBufferPairs[4].size = sizeof(glm::mat4);
+    PtrSizePair constantBufferPairs[1];
+    constantBufferPairs[0].data = constantData;
+    constantBufferPairs[0].size = 256;
     constantBufferData.PSPArray.arr = constantBufferPairs;
-    constantBufferData.PSPArray.count = 5;
+    constantBufferData.PSPArray.count = 1;
     UINT totalSize = getVSPDataSize(vertexData);
     totalSize += getPSPDataSize(indexData);
     totalSize += getPSPDataSize(constantBufferData);
@@ -287,7 +285,9 @@ void Engine::prepareData(){
     //PrintDebugMessages();
     //Creating the gBuffer. Turns out I am not using my default heap for anything right now... Will figure out later.
     renderTextureOffset = resource.texture2Ds.size();
-    Resource::createGPUTexture(windowWidth, windowHeight, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
+    Resource::createGPUTexture(windowWidth, windowHeight, DXGI_FORMAT_R16G16B16A16_UNORM, textureTypeInfo::TEX_TYPE_RGBA, d3D, resource);
+    Heap::createDescriptorHeap(dhInfo::DSV_DH, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, d3D, resource);
+    Resource::createSimpleDepthStencil(windowWidth, windowHeight, d3D, resource);
     Heap::createDescriptorHeap(dhInfo::SAMPLER_DH, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
     Resource::createSimpleSampler(d3D, resource);
     Resource::init2DTexture(textureData, textureWidth, textureHeight, nrChannels, DXGI_FORMAT_R8G8B8A8_UNORM, fenceValue, d3D, resource);
@@ -298,9 +298,9 @@ void Engine::prepareData(){
     RootSignature::createBindlessRootSignature(d3D, resource);
     //Creating the first pipeline state.
     Shader renderShader("../shaders/simple.vsh","../shaders/simple.psh");
-    PipelineState::createGraphicsPSO(psoInfo::RENDER_PSO, renderShader, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
+    PipelineState::createGraphicsPSO(psoInfo::RENDER_PSO, renderShader, true, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
     Shader quadShader("../shaders/quad.vsh", "../shaders/quad.psh");
-    PipelineState::createGraphicsPSO(psoInfo::PRESENT_PSO, quadShader, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
+    PipelineState::createGraphicsPSO(psoInfo::PRESENT_PSO, quadShader, false, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
     PrintDebugMessages();
 }
 
@@ -397,14 +397,17 @@ void Engine::render(){
                                                         0, //Number of RECTs to clear.
                                                         nullptr //Rects to clear, basically we can clear only a certain rect of the RTV if we want to.
                                                         );
+
         //Nullptr and false since no depth/stencil.
-        d3D.commandLists[RENDER]->OMSetRenderTargets(1, &handle, FALSE, nullptr);
+        D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = resource.descriptorHeaps[DSV_DH]->GetCPUDescriptorHandleForHeapStart();
+        d3D.commandLists[RENDER]->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+        d3D.commandLists[RENDER]->OMSetRenderTargets(1, &handle, FALSE, &dsvHandle);
         d3D.commandLists[RENDER]->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         //d3D.commandLists[RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[0]);
         d3D.commandLists[RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[2]);
         d3D.commandLists[RENDER]->IASetIndexBuffer(&resource.ibViews[0]);
         d3D.commandLists[RENDER]->DrawIndexedInstanced(modelIndices[0], 1, 0, 0, 0);
-        //PrintDebugMessages();
+        PrintDebugMessages();
         //d3D.commandLists[RENDER]->DrawInstanced(3, 1, 0, 0);
 
         //PrintDebugMessages();
@@ -441,6 +444,7 @@ void Engine::render(){
         hr = d3D.commandLists[RENDER]->Close();
         if(FAILED(hr)){
             std::cerr<<"Command list close during render-loop failed!";
+            std::cout<<hr;
             return;
         }
         //PrintDebugMessages();

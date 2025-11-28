@@ -13,4 +13,5 @@ public:
     void updateCamera(glm::vec4 changePos, glm::vec4 changeDir, glm::vec4 changeUp);
     glm::mat4 getMatView() { return matView; }
     glm::mat4 getMatProj() { return matProj; }
+    glm::vec4 getVFront() { return vFront; }
 };

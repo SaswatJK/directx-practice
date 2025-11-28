@@ -16,6 +16,7 @@ struct MyConstants{
     float4 modelMatR1;
     float4 modelMatR2;
     float4 modelMatR3;
+    float4 viewFront;
 };
 
 ConstantBuffer <MyConstants> cBuffers[] : register(b0, space0);
@@ -33,8 +34,12 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float4 baseColor = {0.2, 0.2, 0.2, 1.0};
     float4 lightDir = sunPos - input.worldPos;
     lightDir = normalize(lightDir);
-    float lightPercentage = max(dot(lightDir, input.normal), 0.0);
-    float4 finalColor = baseColor + sunColor * lightPercentage;
+    float diffusePercentage = max(dot(lightDir, input.normal), 0.0);
+    float specularStrength = 1.0;
+    float4 viewDir = cBuffers[0].viewFront - input.worldPos;
+    float4 reflectedLightDir = reflect(lightDir, input.normal);
+    float specularPercentage = pow(max(dot(reflectedLightDir, input.normal), 0.0), 8);
+    float4 finalColor = baseColor + sunColor * diffusePercentage + sunColor * specularPercentage;
     float4 texColor = textures[1].Sample(samplers[0], input.texcoord);
     //finalColor = cBuffers[0].color;
     return finalColor;
