@@ -60,6 +60,7 @@ typedef enum {
     SRV_CBV_UAV_DH = 0,
     RTV_DH,
     SAMPLER_DH,
+    DSV_DH,
     DH_COUNT
 }dhInfo;
 
@@ -69,8 +70,15 @@ typedef enum {
     VIEW_RTV,
     VIEW_UAV,
     VIEW_SAMPLER,
+    VIEW_DSV,
     VIEW_COUNT
 }viewInfo;
+
+typedef enum {
+    TEX_TYPE_DEPTH = 0,
+    TEX_TYPE_RGBA,
+    TEX_TYPE_COUNT
+}textureTypeInfo;
 
 typedef enum {
     BACKBUFFER0 = 0,

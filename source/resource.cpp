@@ -1,6 +1,7 @@
 #include "../include/resource.h"
 #include "D3D12/d3d12.h"
 #include "D3D12/dxgicommon.h"
+#include "D3D12/dxgiformat.h"
 #include "utils.h"
 #include <climits>
 #include <combaseapi.h>
@@ -274,7 +275,7 @@ void Resource::createBackBuffers(UINT width, UINT height, DXGI_FORMAT format, co
     }
 }
 
-void Resource::createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources){
+void Resource::createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, textureTypeInfo texType, const D3DGlobal &d3D, D3DResources &resources){
     D3D12_RESOURCE_DESC desc = {};
     DXGI_SAMPLE_DESC sampleDesc = {};
     sampleDesc.Count = 1;
@@ -297,48 +298,76 @@ void Resource::createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, con
     optimizedClearValue.Color[1] = 0.0f;
     optimizedClearValue.Color[2] = 0.0f;
     optimizedClearValue.Color[3] = 1.0f;
-    HRESULT hr = d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &optimizedClearValue, IID_PPV_ARGS(&resources.texture2Ds.back()));
-    if(FAILED(hr)){
-        std::cerr<<"Texture: "<<resources.texture2Ds.size()<<" upload failed!";
-        return;
+    if(texType == textureTypeInfo::TEX_TYPE_RGBA){
+        HRESULT hr = d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &optimizedClearValue, IID_PPV_ARGS(&resources.texture2Ds.back()));
+        if(FAILED(hr)){
+            std::cerr<<"Texture: "<<resources.texture2Ds.size()<<" upload failed!";
+            return;
+        }
+        //I am making this in pixel shader resource state because every loop, it will become pixel shader resource later, and I will have to convert that to render target, so basically I can use the same barrier.
+        //I am thinking of using another wrapper in graphics.cpp to wrap around this to initialize all the render textcures. I could do it here too, but I can't make a desicison rn. I also want to say that I will create another create sampler function if I have to. But the graphics.cpp will create one sampler descriptor heap and that's enough.
+
+        D3D12_TEX2D_RTV tex2Drtv = {};
+        tex2Drtv.MipSlice = 0;
+        tex2Drtv.PlaneSlice = 0;
+
+        D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+        rtvDesc.Texture2D = tex2Drtv;
+        rtvDesc.Format = format;
+        rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[RTV_DH]->GetCPUDescriptorHandleForHeapStart(); //Start of the descriptor heap of that type.
+        UINT descriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV); //Increment size for each of the descriptor. The function returns the size of the handle increment for the given type of descriptor heap, including any necessary padding
+        UINT currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[RTV_DH]; //We are getting the offset to the current descriptor.
+        handle.ptr += currentDescriptorHeapOffset;
+        d3D.device->CreateRenderTargetView(resources.texture2Ds.back().Get(), &rtvDesc, handle);
+        resources.descriptorInHeapCount[RTV_DH]++;
+
+        D3D12_TEX2D_SRV tex2Dsrv = {};
+        tex2Dsrv.MipLevels = 1;
+        tex2Dsrv.MostDetailedMip = 0;
+        tex2Dsrv.PlaneSlice = 0;
+        tex2Dsrv.ResourceMinLODClamp = 0.0f;
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Texture2D = tex2Dsrv;
+        srvDesc.Format = format;
+        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+
+        handle = resources.descriptorHeaps[SRV_CBV_UAV_DH]->GetCPUDescriptorHandleForHeapStart();
+        descriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
+        handle.ptr += currentDescriptorHeapOffset;
+        d3D.device->CreateShaderResourceView(resources.texture2Ds.back().Get(), &srvDesc, handle);
+        resources.eachDescriptorCount[VIEW_SRV] = resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
+        resources.descriptorInHeapCount[SRV_CBV_UAV_DH]++;
     }
-    //I am making this in pixel shader resource state because every loop, it will become pixel shader resource later, and I will have to convert that to render target, so basically I can use the same barrier.
-    //I am thinking of using another wrapper in graphics.cpp to wrap around this to initialize all the render textcures. I could do it here too, but I can't make a desicison rn. I also want to say that I will create another create sampler function if I have to. But the graphics.cpp will create one sampler descriptor heap and that's enough.
+    if(texType == textureTypeInfo::TEX_TYPE_DEPTH){
+        optimizedClearValue.Format = format;
+        optimizedClearValue.DepthStencil.Depth = 1.0f;
+        optimizedClearValue.DepthStencil.Stencil = 0;
+        desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+        HRESULT hr = d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &optimizedClearValue, IID_PPV_ARGS(&resources.texture2Ds.back()));
+        if(FAILED(hr)){
+            std::cerr<<"Texture: "<<resources.texture2Ds.size()<<" upload failed!";
+            return;
+        }
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[DSV_DH]->GetCPUDescriptorHandleForHeapStart(); //Start of the descriptor heap of that type.
+        UINT descriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV); //Increment size for each of the descriptor. The function returns the size of the handle increment for the given type of descriptor heap, including any necessary padding
+        UINT currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[DSV_DH]; //We are getting the offset to the current descriptor.
+        handle.ptr += currentDescriptorHeapOffset;
+        D3D12_TEX2D_DSV tex2Ddsv = {};
+        tex2Ddsv.MipSlice = 0;
 
-    D3D12_TEX2D_RTV tex2Drtv = {};
-    tex2Drtv.MipSlice = 0;
-    tex2Drtv.PlaneSlice = 0;
-
-    D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
-    rtvDesc.Texture2D = tex2Drtv;
-    rtvDesc.Format = format;
-    rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-    D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[RTV_DH]->GetCPUDescriptorHandleForHeapStart(); //Start of the descriptor heap of that type.
-    UINT descriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV); //Increment size for each of the descriptor. The function returns the size of the handle increment for the given type of descriptor heap, including any necessary padding
-    UINT currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[RTV_DH]; //We are getting the offset to the current descriptor.
-    handle.ptr += currentDescriptorHeapOffset;
-    d3D.device->CreateRenderTargetView(resources.texture2Ds.back().Get(), &rtvDesc, handle);
-    resources.descriptorInHeapCount[RTV_DH]++;
-
-    D3D12_TEX2D_SRV tex2Dsrv = {};
-    tex2Dsrv.MipLevels = 1;
-    tex2Dsrv.MostDetailedMip = 0;
-    tex2Dsrv.PlaneSlice = 0;
-    tex2Dsrv.ResourceMinLODClamp = 0.0f;
-
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Texture2D = tex2Dsrv;
-    srvDesc.Format = format;
-    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-
-    handle = resources.descriptorHeaps[SRV_CBV_UAV_DH]->GetCPUDescriptorHandleForHeapStart();
-    descriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
-    handle.ptr += currentDescriptorHeapOffset;
-    d3D.device->CreateShaderResourceView(resources.texture2Ds.back().Get(), &srvDesc, handle);
-    resources.eachDescriptorCount[VIEW_SRV] = resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
-    resources.descriptorInHeapCount[SRV_CBV_UAV_DH]++;
+        D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+        dsvDesc.Format = format;
+        dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
+        dsvDesc.Texture2D = tex2Ddsv;
+        d3D.device->CreateDepthStencilView(resources.texture2Ds.back().Get(), &dsvDesc, handle);
+        resources.eachDescriptorCount[VIEW_DSV] = resources.descriptorInHeapCount[DSV_DH];
+        resources.descriptorInHeapCount[DSV_DH]++;
+    }
 }
 
 void Resource::init2DTexture(void* data, UINT width, UINT height, UINT nrChannels, DXGI_FORMAT format, UINT fenceValue,const D3DGlobal &d3D, D3DResources &resources){
@@ -498,6 +527,10 @@ void Resource::createSimpleSampler(const D3DGlobal &d3D, D3DResources &resources
     resources.descriptorInHeapCount[SAMPLER_DH]++;
 }
 
+void Resource::createSimpleDepthStencil(UINT width, UINT height, const D3DGlobal &d3D, D3DResources &resources){
+    createGPUTexture(width, height, DXGI_FORMAT_D32_FLOAT, textureTypeInfo::TEX_TYPE_DEPTH, d3D, resources);
+}
+
 void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResources &resources){
     //Descriptor range defines a contiguous sequence of resource descriptors of a specific type within a descriptor table. Like the 'width' of a slice, that is descriptor table, of a data, that is descriptor heap.
     D3D12_DESCRIPTOR_RANGE srvRange = {};
@@ -578,7 +611,7 @@ void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResourc
     }
 };
 
-void PipelineState::createGraphicsPSO(psoInfo info, const Shader &shader, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources){
+void PipelineState::createGraphicsPSO(psoInfo info, const Shader &shader, bool depthEnable, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources){
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
     //Will be using the same dxgi_sample_desc that I created for swap chain.
     psoDesc.SampleDesc.Count = 1;
@@ -629,9 +662,18 @@ void PipelineState::createGraphicsPSO(psoInfo info, const Shader &shader, DXGI_F
     {"NORMAL", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 32, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
     simpleInputLayoutDesc.pInputElementDescs = simpleInputElementDesc;
     simpleInputLayoutDesc.NumElements = _countof(simpleInputElementDesc); //Only vertex right now.
+    psoDesc.SampleMask = UINT_MAX; //The sample mask for the blend state. Use in Multisampling to selectively enable or disable certain/specific samples.
+    if(depthEnable){
+    psoDesc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    psoDesc.DepthStencilState.DepthEnable = TRUE;
+    psoDesc.DepthStencilState.StencilEnable = FALSE;
+    psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    psoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    }
+    else{
     psoDesc.DepthStencilState.DepthEnable = FALSE;
     psoDesc.DepthStencilState.StencilEnable = FALSE;
-    psoDesc.SampleMask = UINT_MAX; //The sample mask for the blend state. Use in Multisampling to selectively enable or disable certain/specific samples.
+    }
     psoDesc.RasterizerState = simpleRasterizerDesc;
     psoDesc.InputLayout = simpleInputLayoutDesc;
     //psoDesc.IBStripCutValue, we are not filling this cause we don't have an index buffer.
