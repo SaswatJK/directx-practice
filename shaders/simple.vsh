@@ -22,6 +22,7 @@ ConstantBuffer <MyConstants> cBuffers[] : register(b0, space0);
 struct PSInput {
     float4 position : SV_POSITION; //System-value semantic for clip-space position
     float4 normal : NORMAL0;
+    float4 worldPos :POSITION1;
     float2 texcoord : TEXCOORD0;
 };
 
@@ -43,6 +44,7 @@ PSInput VSMain(float4 position : POSITION, float4 color : COLOR, float4 normal :
 
     result.texcoord = position.xy * 0.5f + 0.5f;
     result.normal = normal;
+    result.worldPos = worldPos;
     result.texcoord.y = 1.0f - result.texcoord.y; //Forgot that uv is flipped in directx.
     return result;
 }

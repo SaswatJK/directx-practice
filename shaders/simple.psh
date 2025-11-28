@@ -21,16 +21,22 @@ struct MyConstants{
 ConstantBuffer <MyConstants> cBuffers[] : register(b0, space0);
 
 struct PSInput {
-    float4 position : SV_POSITION;
+    float4 position : SV_POSITION; //System-value semantic for clip-space position
     float4 normal : NORMAL0;
+    float4 worldPos :POSITION1;
     float2 texcoord : TEXCOORD0;
 };
 
 float4 PSMain(PSInput input) : SV_TARGET {
-    float4 finalColor;
+    float4 sunPos = {-20, 50, 0, 1.0};
+    float4 sunColor = {1.0, 1.0, 0.0, 1.0};
+    float4 baseColor = {0.2, 0.2, 0.2, 1.0};
+    float4 lightDir = sunPos - input.worldPos;
+    lightDir = normalize(lightDir);
+    float lightPercentage = max(dot(lightDir, input.normal), 0.0);
+    float4 finalColor = baseColor + sunColor * lightPercentage;
     float4 texColor = textures[1].Sample(samplers[0], input.texcoord);
     //finalColor = cBuffers[0].color;
-    finalColor = float4(1.0, 1.0, 1.0, 1.0);
     return finalColor;
     //return input.normal;
 
