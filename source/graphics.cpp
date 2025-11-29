@@ -17,6 +17,7 @@
 #include <dxgi.h>
 #include <dxgi1_5.h>
 #include <wincrypt.h>
+#include <winuser.h>
 #include <wrl/client.h>
 #include <windows.h>
 #include <glm/gtc/matrix_access.hpp>
@@ -309,6 +310,7 @@ void Engine::render(){
     running = true;
     SDL_Event sdlEvent;
     float eachStep = 0.05;
+    float eachDir = 0.005;
     if(!window){
         std::cerr<<"SDL Window Creation has failed!";
         return;
@@ -321,44 +323,67 @@ void Engine::render(){
                 running = false;
                 break;
             }
-        //static unsigned char wereDown = 0b00000000;
-        // 0bWWAASSDD
+        // areDownMov   || areDownDir
+        // 0bWASDShSp00 || 0bLRUpDn0000
         SHORT stateA = GetAsyncKeyState('A');
         SHORT stateW = GetAsyncKeyState('W');
         SHORT stateS = GetAsyncKeyState('S');
         SHORT stateD = GetAsyncKeyState('D');
-        unsigned char areDown = 0b00000000;
-        areDown = (stateW & 0x8000) ? (areDown | 0b11000000) : (areDown & 0b00111111);
-        areDown = (stateA & 0x8000) ? (areDown | 0b00110000) : (areDown & 0b11001111);
-        areDown = (stateS & 0x8000) ? (areDown | 0b00001100) : (areDown & 0b11110011);
-        areDown = (stateD & 0x8000) ? (areDown | 0b00000011) : (areDown & 0b11111100);
-        float xOffset = 0;
-        float zOffset = 0;
-        //if (areDown != wereDown){
+        SHORT stateCt = GetAsyncKeyState(VK_LCONTROL);
+        SHORT stateSp  = GetAsyncKeyState(VK_SPACE);
+        SHORT stateL = GetAsyncKeyState(VK_LEFT);
+        SHORT stateR = GetAsyncKeyState(VK_RIGHT);
+        SHORT stateUp = GetAsyncKeyState(VK_UP);
+        SHORT stateDn = GetAsyncKeyState(VK_DOWN);
+        unsigned char areDownMovement = 0b00000000;
+        unsigned char areDownDirection = 0b00000000;
+        areDownMovement = (stateW & 0x8000) ? (areDownMovement | 0b10000000) : (areDownMovement & 0b01111111);
+        areDownMovement = (stateA & 0x8000) ? (areDownMovement | 0b01000000) : (areDownMovement & 0b10111111);
+        areDownMovement = (stateS & 0x8000) ? (areDownMovement | 0b00100000) : (areDownMovement & 0b11011111);
+        areDownMovement = (stateD & 0x8000) ? (areDownMovement | 0b00010000) : (areDownMovement & 0b11101111);
+        areDownMovement = (stateCt & 0x8000) ? (areDownMovement | 0b00001000) : (areDownMovement & 0b11110111);
+        areDownMovement = (stateSp & 0x8000) ? (areDownMovement | 0b00000100) : (areDownMovement & 0b11111011);
+        areDownDirection = (stateL & 0x8000) ? (areDownDirection | 0b10000000) : (areDownDirection & 0b01111111);
+        areDownDirection = (stateR & 0x8000) ? (areDownDirection | 0b01000000) : (areDownDirection & 0b10111111);
+        areDownDirection = (stateUp & 0x8000) ? (areDownDirection | 0b00100000) : (areDownDirection & 0b11011111);
+        areDownDirection = (stateDn & 0x8000) ? (areDownDirection | 0b00010000) : (areDownDirection & 0b11101111);
+        float xMovChange = 0;
+        float zMovChange = 0;
+        float yMovChange = 0;
+        float xDirChange = 0;
+        float yDirChange = 0;
+        if(areDownMovement != 0 || areDownDirection != 0) {
             DataArray constantBufferData = {};
             PtrSizePair constantBufferPairs[1];
             glm::vec4* start = (glm::vec4*)constantData;
             start += 2;
             glm::mat4* viewMat = (glm::mat4*)start;
-            xOffset = (areDown & 0b00110011) ?
-                                (areDown & 0b00110000) ? -eachStep : eachStep
+            xMovChange = (areDownMovement & 0b01010000) ?
+                                (areDownMovement & 0b01000000) ? -eachStep : eachStep
                                 : 0;
-            zOffset = (areDown & 0b11001100) ?
-                                (areDown & 0b11000000) ? -eachStep : eachStep
+            zMovChange = (areDownMovement & 0b10100000) ?
+                                (areDownMovement & 0b10000000) ? -eachStep : eachStep
                                 : 0;
-            if(xOffset != 0 || zOffset != 0){
-                camera->updateCamera(glm::vec4 (xOffset, 0, zOffset, 0), glm::vec4(0, 0, 0, 0) , glm::vec4 (0, 0, 0, 0));
-                *viewMat = camera->getMatView();
-                glm::mat4* projMat = viewMat + 1;
-                *projMat = camera->getMatProj();
-                constantBufferPairs->data = constantData;
-                constantBufferPairs->size = 256;
-                constantBufferData.PSPArray.arr = constantBufferPairs;
-                constantBufferData.PSPArray.count = 1;
-                Resource::updateConstantBuffer(constantBufferData, d3D, resource);
+            yMovChange = (areDownMovement & 0b00001100) ?
+                                (areDownMovement & 0b00001000) ? -eachStep : eachStep
+                                : 0;
+            xDirChange = (areDownDirection & 0b11000000) ?
+                                (areDownDirection & 0b10000000) ? eachDir : -eachDir
+                                : 0;
+            yDirChange = (areDownDirection & 0b00110000) ?
+                                (areDownDirection & 0b00100000) ? -eachDir : eachDir
+                                : 0;
+
+            camera->updateCamera(glm::vec4 (xMovChange, yMovChange, zMovChange, 0), glm::vec4(xDirChange, yDirChange, 0, 0) , glm::vec4 (0, 0, 0, 0));
+            *viewMat = camera->getMatView();
+            glm::mat4* projMat = viewMat + 1;
+            *projMat = camera->getMatProj();
+            constantBufferPairs->data = constantData;
+            constantBufferPairs->size = 256;
+            constantBufferData.PSPArray.arr = constantBufferPairs;
+            constantBufferData.PSPArray.count = 1;
+            Resource::updateConstantBuffer(constantBufferData, d3D, resource);
             }
-        //}
-        //wereDown = areDown;
         hr = d3D.commandAllocators[cmdAllocator::PRIMARY]->Reset();
         if(FAILED(hr)){
             std::cerr<<"Command allocator is reset during the start of each frame, and it couldn't reset!";
