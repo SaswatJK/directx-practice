@@ -308,6 +308,7 @@ void Engine::render(){
     bool running;
     running = true;
     SDL_Event sdlEvent;
+    float eachStep = 0.05;
     if(!window){
         std::cerr<<"SDL Window Creation has failed!";
         return;
@@ -320,17 +321,31 @@ void Engine::render(){
                 running = false;
                 break;
             }
-        static bool wasDown = false;
-        SHORT state = GetAsyncKeyState('A');
-        bool isDown = (state & 0x8000);
+        //static unsigned char wereDown = 0b00000000;
+        // 0bWWAASSDD
+        SHORT stateA = GetAsyncKeyState('A');
+        SHORT stateW = GetAsyncKeyState('W');
+        SHORT stateS = GetAsyncKeyState('S');
+        SHORT stateD = GetAsyncKeyState('D');
+        unsigned char areDown = 0b00000000;
+        areDown = (stateW & 0x8000) ? (areDown | 0b11000000) : (areDown & 0b00111111);
+        areDown = (stateA & 0x8000) ? (areDown | 0b00110000) : (areDown & 0b11001111);
+        areDown = (stateS & 0x8000) ? (areDown | 0b00001100) : (areDown & 0b11110011);
+        areDown = (stateD & 0x8000) ? (areDown | 0b00000011) : (areDown & 0b11111100);
 
-        if (isDown && !wasDown){
+        //if (areDown != wereDown){
             DataArray constantBufferData = {};
             PtrSizePair constantBufferPairs[1];
             glm::vec4* start = (glm::vec4*)constantData;
             start += 2;
             glm::mat4* viewMat = (glm::mat4*)start;
-            camera->updateCamera(glm::vec4 (-0.5, 0, 0, 0), glm::vec4(0, 0, 0, 0) , glm::vec4 (0, 0, 0, 0));
+            float xOffset = (areDown & 0b00110011) ?
+                                (areDown & 0b00110000) ? -eachStep : eachStep
+                                : 0;
+            float zOffset = (areDown & 0b11001100) ?
+                                (areDown & 0b11000000) ? -eachStep : eachStep
+                                : 0;
+            camera->updateCamera(glm::vec4 (xOffset, 0, zOffset, 0), glm::vec4(0, 0, 0, 0) , glm::vec4 (0, 0, 0, 0));
             *viewMat = camera->getMatView();
             glm::mat4* projMat = viewMat + 1;
             *projMat = camera->getMatProj();
@@ -339,8 +354,8 @@ void Engine::render(){
             constantBufferData.PSPArray.arr = constantBufferPairs;
             constantBufferData.PSPArray.count = 1;
             Resource::updateConstantBuffer(constantBufferData, d3D, resource);
-        }
-        wasDown = isDown;
+        //}
+        //wereDown = areDown;
         hr = d3D.commandAllocators[cmdAllocator::PRIMARY]->Reset();
         if(FAILED(hr)){
             std::cerr<<"Command allocator is reset during the start of each frame, and it couldn't reset!";
