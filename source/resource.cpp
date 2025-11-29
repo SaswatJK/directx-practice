@@ -41,16 +41,13 @@ UINT getPSPDataSize(const DataArray &data){
 }
 
 void Heap::createHeap(UINT size, heapInfo heap, const D3DGlobal &d3D, D3DResources &resources){
-    UINT heapSize = size;
-    UINT heaps = heapSize/65536 + 1;
+    UINT heapSize = 0;
+    UINT heapSizeByCount = size;
     D3D12_HEAP_DESC desc;
     switch(heap) {
         case UPLOAD_HEAP:
             desc.Properties = uploadHeapProperties;
-            if(heapSize < 65536 * 4) // The 4 bfufers that will be placed in the upload heap
-                heapSize = 65536 * 4;
-            else
-                heapSize = 65536 * heaps;
+                heapSize = 65536 * heapSizeByCount;
             break;
         case DEFAULT_HEAP:
             desc.Properties = defaultHeapProperties;
