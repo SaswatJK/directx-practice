@@ -244,9 +244,9 @@ void Engine::prepareData(){
     vertexData.VSPArray.arr = triAndQuad;
     vertexData.VSPArray.count = 3;
     PtrSizePair modelQuadIn[2];
-    modelQuadIn[0].data = diabloModel.meshes.data();
-    modelQuadIn[0].size = diabloModel.meshes.size() * sizeof(Mesh);
-    modelIndices.push_back(diabloModel.meshes.size() * 3);
+    modelQuadIn[0].data = diabloModel.faces.data();
+    modelQuadIn[0].size = diabloModel.faces.size() * sizeof(Face);
+    modelIndices.push_back(diabloModel.faces.size() * 3);
     modelQuadIn[1].data = quadIndices;
     modelQuadIn[1].size = sizeof(quadIndices);
     DataArray indexData = {};
@@ -259,11 +259,11 @@ void Engine::prepareData(){
     constantBufferPairs[0].size = 256;
     constantBufferData.PSPArray.arr = constantBufferPairs;
     constantBufferData.PSPArray.count = 1;
-    UINT totalSize = getVSPDataSize(vertexData);
-    totalSize += getPSPDataSize(indexData);
-    totalSize += getPSPDataSize(constantBufferData);
+    UINT totalSizeByCount = (getVSPDataSize(vertexData)/65536) + 1;
+    totalSizeByCount += (getPSPDataSize(indexData)/65536) + 1;
+    totalSizeByCount += (getPSPDataSize(constantBufferData)/65536) + 1;
     //Creating upload Heap.
-    Heap::createHeap(totalSize, heapInfo::UPLOAD_HEAP, d3D, resource);
+    Heap::createHeap(totalSizeByCount, heapInfo::UPLOAD_HEAP, d3D, resource);
     //PrintDebugMessages();
     //Creating a descriptor heap for the srvs and cbvs.
     Heap::createDescriptorHeap(dhInfo::SRV_CBV_UAV_DH, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
@@ -332,28 +332,31 @@ void Engine::render(){
         areDown = (stateA & 0x8000) ? (areDown | 0b00110000) : (areDown & 0b11001111);
         areDown = (stateS & 0x8000) ? (areDown | 0b00001100) : (areDown & 0b11110011);
         areDown = (stateD & 0x8000) ? (areDown | 0b00000011) : (areDown & 0b11111100);
-
+        float xOffset = 0;
+        float zOffset = 0;
         //if (areDown != wereDown){
             DataArray constantBufferData = {};
             PtrSizePair constantBufferPairs[1];
             glm::vec4* start = (glm::vec4*)constantData;
             start += 2;
             glm::mat4* viewMat = (glm::mat4*)start;
-            float xOffset = (areDown & 0b00110011) ?
+            xOffset = (areDown & 0b00110011) ?
                                 (areDown & 0b00110000) ? -eachStep : eachStep
                                 : 0;
-            float zOffset = (areDown & 0b11001100) ?
+            zOffset = (areDown & 0b11001100) ?
                                 (areDown & 0b11000000) ? -eachStep : eachStep
                                 : 0;
-            camera->updateCamera(glm::vec4 (xOffset, 0, zOffset, 0), glm::vec4(0, 0, 0, 0) , glm::vec4 (0, 0, 0, 0));
-            *viewMat = camera->getMatView();
-            glm::mat4* projMat = viewMat + 1;
-            *projMat = camera->getMatProj();
-            constantBufferPairs->data = constantData;
-            constantBufferPairs->size = 256;
-            constantBufferData.PSPArray.arr = constantBufferPairs;
-            constantBufferData.PSPArray.count = 1;
-            Resource::updateConstantBuffer(constantBufferData, d3D, resource);
+            if(xOffset != 0 || zOffset != 0){
+                camera->updateCamera(glm::vec4 (xOffset, 0, zOffset, 0), glm::vec4(0, 0, 0, 0) , glm::vec4 (0, 0, 0, 0));
+                *viewMat = camera->getMatView();
+                glm::mat4* projMat = viewMat + 1;
+                *projMat = camera->getMatProj();
+                constantBufferPairs->data = constantData;
+                constantBufferPairs->size = 256;
+                constantBufferData.PSPArray.arr = constantBufferPairs;
+                constantBufferData.PSPArray.count = 1;
+                Resource::updateConstantBuffer(constantBufferData, d3D, resource);
+            }
         //}
         //wereDown = areDown;
         hr = d3D.commandAllocators[cmdAllocator::PRIMARY]->Reset();
