@@ -1,13 +1,16 @@
 #pragma once
 #include <utils.h>
+#include <vector>
 
 typedef struct{
     uint32_t indices[3];
-}Mesh;
+}Face;
+
 class Model{
 public:
     std::vector<Vertex> vertices;
-    std::vector<Mesh> meshes;
+    std::vector<Face> faces;
+    std::vector<unsigned int> vertexInfo;
     glm::mat4 modelMatrix;
     //We will check that the number of Meshes isn't going to be more than the maximum number of Triangles that can be made with 'N' Vertices:
     //I calculated this using basic deduction through a complete graph: Maximum number of triangles in a complete graph is:

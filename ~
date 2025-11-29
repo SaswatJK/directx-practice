@@ -21,8 +21,7 @@ void Model::loadModel(const std::string &path, glm::vec3 position, glm::vec3 rot
         Vertex tempVertexData;
         tempVertexData.color = glm::vec4(0);
         tempVertexData.position = glm::vec4(0);
-        tempVertexData.normal = glm::vec4(0);
-        unsigned int tempInfo = 3773;
+        tempVertexData.normal = glm::vec4(6972);
         glm::vec4 tempNormal;
         if(iss >> identifier){
             if (identifier == "v"){
@@ -33,7 +32,7 @@ void Model::loadModel(const std::string &path, glm::vec3 position, glm::vec3 rot
                 tempVertexData.position.z = v3;
                 tempVertexData.position.w = 1.0;
                 vertices.push_back(tempVertexData);
-                vertexInfo.push_back(tempInfo);
+
             }
             else if (identifier == "vn") {
                 float v1, v2, v3;
@@ -57,45 +56,31 @@ void Model::loadModel(const std::string &path, glm::vec3 position, glm::vec3 rot
                     }
                 }
                //Check to see if the normals have been repeated. If so, do some basic mathematics and logic and just repeat that vertex.
-                if(vertexInfo[groupNumbers[0]] == 3773){
+                bool vertexRepeat = false;
+                if(vertices[groupNumbers[0]].normal.x !=  6972 || vertices[groupNumbers[0]].normal.y !=  6972 || vertices[groupNumbers[0]].normal.z !=  6972)
                     vertices[groupNumbers[0]].normal = normals[groupNumbers[2]];
-                    vertexInfo[groupNumbers[0]] = 79;
-                }
                 else{
-                    tempVertexData.position = vertices[groupNumbers[0]].position;
-                    tempVertexData.normal = normals[groupNumbers[2]];
                     groupNumbers[0] = vertices.size();
-                    vertices.push_back(tempVertexData);
-                    vertexInfo.push_back(79);
+
                 }
-                if(vertexInfo[groupNumbers[3]] == 3773){
+                
+                if(vertices[groupNumbers[3]].normal.x !=  6972 || vertices[groupNumbers[3]].normal.y !=  6972 || vertices[groupNumbers[3]].normal.z !=  6972)
                     vertices[groupNumbers[3]].normal = normals[groupNumbers[5]];
-                    vertexInfo[groupNumbers[3]] = 79;
-                }
                 else{
-                    tempVertexData.position = vertices[groupNumbers[3]].position;
-                    tempVertexData.normal = normals[groupNumbers[5]];
-                    groupNumbers[3] = vertices.size();
-                    vertices.push_back(tempVertexData);
-                    vertexInfo.push_back(79);
-
+                
                 }
-                if(vertexInfo[groupNumbers[6]] == 3773){
+                
+                if(vertices[groupNumbers[6]].normal.x !=  6972 || vertices[groupNumbers[6]].normal.y !=  6972 || vertices[groupNumbers[6]].normal.z !=  6972)
                     vertices[groupNumbers[6]].normal = normals[groupNumbers[8]];
-                    vertexInfo[groupNumbers[6]] = 79;
-                }
                 else{
-                    tempVertexData.position = vertices[groupNumbers[6]].position;
-                    tempVertexData.normal = normals[groupNumbers[8]];
-                    groupNumbers[6] = vertices.size();
-                    vertices.push_back(tempVertexData);
-                    vertexInfo.push_back(79);
-
+                
                 }
+                
                 tempFace.indices[0] = groupNumbers[0];
                 tempFace.indices[1] = groupNumbers[3];
                 tempFace.indices[2] = groupNumbers[6];
-                faces.push_back(tempFace);
+ 
+                    faces.push_back(tempFace);
             }
         }
     }
