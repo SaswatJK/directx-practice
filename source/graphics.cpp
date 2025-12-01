@@ -168,9 +168,9 @@ Engine::Engine(){
 };
 
 void Engine::prepareData(){
-    glm::vec4 cameraPos = {1.0f, 0.0f, 10.0f, 1.0f};
-    glm::vec4 cameraDir = {0.0f, 0.0f, -1.0f, 1.0f};
-    glm::vec4 cameraUp = {0.0f, 1.0f, 0.0f, 1.0f};
+    glm::vec3 cameraPos = {1.0f, 0.0f, 10.0f};
+    glm::vec3 cameraDir = {0.0f, 0.0f, -1.0f};
+    glm::vec3 cameraUp = {0.0f, 1.0f, 0.0f};
     camera = new Camera(cameraPos, cameraDir, cameraUp); //Using new instead of malloc cause it's a class with it's constructors and what not.
 
     Vertex triangleVertices[3] = {
@@ -227,7 +227,7 @@ void Engine::prepareData(){
         std::cout<<"Texture data can't be opened in memory!";
     VertexSizePair triAndQuad[3]; //Makes them congiguous.
     Model diabloModel;
-    diabloModel.loadModel("C:/Users/broia/Downloads/diablo3Pose.obj", glm::vec3(0, 0, -2), glm::vec3(0, 0, 0), glm::vec3(2.5, 2.5, 2.5));
+    diabloModel.loadModel("../resources/modelInfo.txt");
     glm::mat4 tempModelMat4 = diabloModel.modelMatrix;
     glm::mat4* modelMatR = projMatR + 1;
     *modelMatR = tempModelMat4;
@@ -324,9 +324,9 @@ void Engine::render(){
                 break;
             }
         // areDownMov   || areDownDir
-        // 0bWASDShSp00 || 0bLRUpDn0000
-        SHORT stateA = GetAsyncKeyState('A');
+        // 0bWASDCtSp00 || 0bLRUpDn0000
         SHORT stateW = GetAsyncKeyState('W');
+        SHORT stateA = GetAsyncKeyState('A');
         SHORT stateS = GetAsyncKeyState('S');
         SHORT stateD = GetAsyncKeyState('D');
         SHORT stateCt = GetAsyncKeyState(VK_LCONTROL);
@@ -362,7 +362,7 @@ void Engine::render(){
                                 (areDownMovement & 0b01000000) ? -eachStep : eachStep
                                 : 0;
             zMovChange = (areDownMovement & 0b10100000) ?
-                                (areDownMovement & 0b10000000) ? -eachStep : eachStep
+                                (areDownMovement & 0b10000000) ? eachStep : -eachStep
                                 : 0;
             yMovChange = (areDownMovement & 0b00001100) ?
                                 (areDownMovement & 0b00001000) ? -eachStep : eachStep
@@ -371,10 +371,10 @@ void Engine::render(){
                                 (areDownDirection & 0b10000000) ? eachDir : -eachDir
                                 : 0;
             yDirChange = (areDownDirection & 0b00110000) ?
-                                (areDownDirection & 0b00100000) ? -eachDir : eachDir
+                                (areDownDirection & 0b00100000) ? eachDir : -eachDir
                                 : 0;
 
-            camera->updateCamera(glm::vec4 (xMovChange, yMovChange, zMovChange, 0), glm::vec4(xDirChange, yDirChange, 0, 0) , glm::vec4 (0, 0, 0, 0));
+            camera->updateCamera(glm::vec3(xMovChange, yMovChange, zMovChange), glm::vec3(xDirChange, yDirChange, 0) , glm::vec3 (0, 0, 0));
             *viewMat = camera->getMatView();
             glm::mat4* projMat = viewMat + 1;
             *projMat = camera->getMatProj();
