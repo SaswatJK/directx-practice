@@ -226,9 +226,10 @@ void Engine::prepareData(){
     if (textureData == nullptr)
         std::cout<<"Texture data can't be opened in memory!";
     VertexSizePair triAndQuad[3]; //Makes them congiguous.
-    Model diabloModel;
-    diabloModel.loadModel("../resources/modelInfo.txt");
-    glm::mat4 tempModelMat4 = diabloModel.modelMatrix;
+    Models firstModels;
+    firstModels.loadModels("../resources/modelInfo.txt");
+    unsigned int numOfModels = firstModels.models.size();
+    glm::mat4 tempModelMat4 = firstModels.models[0].modelMatrix;
     glm::mat4* modelMatR = projMatR + 1;
     *modelMatR = tempModelMat4;
     modelMatR += 1;
@@ -239,15 +240,15 @@ void Engine::prepareData(){
     triAndQuad[0].size = sizeof(triangleVertices);
     triAndQuad[1].data = quadVertices;
     triAndQuad[1].size = sizeof(quadVertices);
-    triAndQuad[2].data = diabloModel.vertices.data();
-    triAndQuad[2].size = diabloModel.vertices.size() * sizeof(Vertex);
+    triAndQuad[2].data = firstModels.models[0].vertices.data();
+    triAndQuad[2].size = firstModels.models[0].vertices.size() * sizeof(Vertex);
     DataArray vertexData = {};
     vertexData.VSPArray.arr = triAndQuad;
     vertexData.VSPArray.count = 3;
     PtrSizePair modelQuadIn[2];
-    modelQuadIn[0].data = diabloModel.faces.data();
-    modelQuadIn[0].size = diabloModel.faces.size() * sizeof(Face);
-    modelIndices.push_back(diabloModel.faces.size() * 3);
+    modelQuadIn[0].data = firstModels.models[0].faces.data();
+    modelQuadIn[0].size = firstModels.models[0].faces.size() * sizeof(Face);
+    modelIndices.push_back(firstModels.models[0].faces.size() * 3);
     modelQuadIn[1].data = quadIndices;
     modelQuadIn[1].size = sizeof(quadIndices);
     DataArray indexData = {};

@@ -7,49 +7,9 @@
 #include <sstream>
 #include <string>
 
-void Model::loadModel(const std::string &modelInfoPath){
+void Model::loadModel(std::string &modelPath, glm::vec3 worldPos, glm::vec3 worldRotate, glm::vec3 worldScale){
     std::vector<glm::vec4> normals;
-    std::string actualPath;
-    std::ifstream filePath(modelInfoPath);
-    glm::vec3 modelWorldPos = glm::vec3(0);
-    glm::vec3 modelWorldRot = glm::vec3(0);
-    glm::vec3 modelWorldScl = glm::vec3(0);
-    if (!filePath.is_open()) {
-        std::cerr << "Error opening modelInfo file!" << std::endl;
-        return;
-    }
-    std::string fileLine;
-    while (std::getline(filePath, fileLine)){
-        std::string identifier;
-        std::istringstream iss(fileLine);
-        iss >> identifier;
-        if(identifier == "path"){
-            iss >> actualPath;
-        }
-        if(identifier == "p"){
-         float v1, v2, v3;
-                iss >> v1 >> v2 >> v3;
-                modelWorldPos.x = v1;
-                modelWorldPos.y = v2;
-                modelWorldPos.z = v3;
-        }
-        if(identifier == "r"){
-         float v1, v2, v3;
-                iss >> v1 >> v2 >> v3;
-                modelWorldRot.x = v1;
-                modelWorldRot.y = v2;
-                modelWorldRot.z = v3;
-        }
-        if(identifier == "s"){
-         float v1, v2, v3;
-                iss >> v1 >> v2 >> v3;
-                modelWorldScl.x = v1;
-                modelWorldScl.y = v2;
-                modelWorldScl.z = v3;
-        }
-    }
-
-    std::ifstream file(actualPath);
+    std::ifstream file(modelPath);
     std::string line;
     if (!file.is_open()) {
         std::cerr << "Error opening model file!" << std::endl;
@@ -140,7 +100,62 @@ void Model::loadModel(const std::string &modelInfoPath){
         }
     }
     file.close();
-    glm::mat4 Scale = glm::scale(glm::mat4(1.0f), modelWorldScl);
-    glm::mat4 Trans = glm::translate(glm::mat4(1.0f), modelWorldPos);
+    glm::mat4 Scale = glm::scale(glm::mat4(1.0f), worldScale);
+    glm::mat4 Trans = glm::translate(glm::mat4(1.0f), worldPos);
     modelMatrix = Trans * Scale;
+}
+
+void Models::loadModels(const std::string &modelInfoPath){
+    std::vector<std::string> actualPath;
+    std::ifstream filePath(modelInfoPath);
+    std::vector<glm::vec3> modelWorldPos;
+    std::vector<glm::vec3> modelWorldRot;
+    std::vector<glm::vec3> modelWorldScl;
+    if (!filePath.is_open()) {
+        std::cerr << "Error opening modelInfo file!" << std::endl;
+        return;
+    }
+    std::string fileLine;
+    while (std::getline(filePath, fileLine)){
+        std::string currentPath;
+        std::string identifier;
+        glm::vec3 tempWorldPos;
+        glm::vec3 tempWorldRot;
+        glm::vec3 tempWorldScl;
+
+        std::istringstream iss(fileLine);
+        iss >> identifier;
+        if(identifier == "path"){
+            iss >> currentPath;
+            actualPath.push_back(currentPath);
+        }
+        if(identifier == "p"){
+            float v1, v2, v3;
+            iss >> v1 >> v2 >> v3;
+            tempWorldPos.x = v1;
+            tempWorldPos.y = v2;
+            tempWorldPos.z = v3;
+            modelWorldPos.push_back(tempWorldPos);
+        }
+        if(identifier == "r"){
+        float v1, v2, v3;
+            iss >> v1 >> v2 >> v3;
+            tempWorldRot.x = v1;
+            tempWorldRot.y = v2;
+            tempWorldRot.z = v3;
+            modelWorldRot.push_back(tempWorldRot);
+        }
+        if(identifier == "s"){
+        float v1, v2, v3;
+            iss >> v1 >> v2 >> v3;
+            tempWorldScl.x = v1;
+            tempWorldScl.y = v2;
+            tempWorldScl.z = v3;
+            modelWorldScl.push_back(tempWorldScl);
+        }
+    }
+    models.reserve(actualPath.size());
+    for(size_t i = 0; i < actualPath.size(); i++){
+        models[i].loadModel(actualPath[i], modelWorldPos[i], modelWorldRot[i], modelWorldScl[i]);
+    }
 }
