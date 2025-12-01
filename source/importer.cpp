@@ -5,14 +5,54 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <string>
 
-void Model::loadModel(const std::string &path, glm::vec3 position, glm::vec3 rotation, glm::vec3 scale){
+void Model::loadModel(const std::string &modelInfoPath){
     std::vector<glm::vec4> normals;
-    std::ifstream file(path);
-    std::string line;
+    std::string actualPath;
+    std::ifstream filePath(modelInfoPath);
+    glm::vec3 modelWorldPos = glm::vec3(0);
+    glm::vec3 modelWorldRot = glm::vec3(0);
+    glm::vec3 modelWorldScl = glm::vec3(0);
+    if (!filePath.is_open()) {
+        std::cerr << "Error opening modelInfo file!" << std::endl;
+        return;
+    }
+    std::string fileLine;
+    while (std::getline(filePath, fileLine)){
+        std::string identifier;
+        std::istringstream iss(fileLine);
+        iss >> identifier;
+        if(identifier == "path"){
+            iss >> actualPath;
+        }
+        if(identifier == "p"){
+         float v1, v2, v3;
+                iss >> v1 >> v2 >> v3;
+                modelWorldPos.x = v1;
+                modelWorldPos.y = v2;
+                modelWorldPos.z = v3;
+        }
+        if(identifier == "r"){
+         float v1, v2, v3;
+                iss >> v1 >> v2 >> v3;
+                modelWorldRot.x = v1;
+                modelWorldRot.y = v2;
+                modelWorldRot.z = v3;
+        }
+        if(identifier == "s"){
+         float v1, v2, v3;
+                iss >> v1 >> v2 >> v3;
+                modelWorldScl.x = v1;
+                modelWorldScl.y = v2;
+                modelWorldScl.z = v3;
+        }
+    }
 
+    std::ifstream file(actualPath);
+    std::string line;
     if (!file.is_open()) {
-        std::cerr << "Error opening file!" << std::endl;
+        std::cerr << "Error opening model file!" << std::endl;
         return;
     }
     while (std::getline(file, line)) {
@@ -100,7 +140,7 @@ void Model::loadModel(const std::string &path, glm::vec3 position, glm::vec3 rot
         }
     }
     file.close();
-    glm::mat4 Scale = glm::scale(glm::mat4(1.0f), scale);
-    glm::mat4 Trans = glm::translate(glm::mat4(1.0f), position);
+    glm::mat4 Scale = glm::scale(glm::mat4(1.0f), modelWorldScl);
+    glm::mat4 Trans = glm::translate(glm::mat4(1.0f), modelWorldPos);
     modelMatrix = Trans * Scale;
 }
