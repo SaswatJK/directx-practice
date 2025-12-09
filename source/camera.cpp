@@ -1,6 +1,5 @@
 #include "../include/camera.h"
 #include "glm/ext/matrix_clip_space.hpp"
-#include "glm/ext/quaternion_geometric.hpp"
 #include "glm/geometric.hpp"
 
 Camera::Camera(glm::vec3 initPos, glm::vec3 initDir, glm::vec3 initUp) : vEye(initPos), vFront(initDir), vUp(initUp) {

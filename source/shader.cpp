@@ -31,6 +31,15 @@ Shader::Shader(const std::string& vsPath, const std::string& psPath){
                     &errorBlob);
     if(FAILED(hr)){
         std::cout<<"Failed to compile Vertex Shader";
+        if (errorBlob) {
+            // Print the actual shader compilation error
+            std::cerr << "Shader compilation failed:\n" 
+                      << (char*)errorBlob->GetBufferPointer() << std::endl;
+            errorBlob->Release();
+        } else {
+            std::cerr << "Shader compilation failed with HRESULT: 0x" 
+                      << std::hex << hr << std::dec << std::endl;
+        }
         return;
     }
     hr = D3DCompile(tempPS.c_str(), //source of the shader
