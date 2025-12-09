@@ -178,7 +178,7 @@ void Resource::initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DR
     }
 }
 
-void Resource::initConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources){
+void Resource::initPerFrameConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources){
     D3D12_RESOURCE_DESC desc = {};
     UINT dataSize = 256; //I'm not goind to do a bunch of crazy stuff..
     DXGI_SAMPLE_DESC sampleDesc = {}; //Multisampling, mandatory to fill even for resources that don't make sense
@@ -198,28 +198,28 @@ void Resource::initConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D
                                                   resources.heapOffsets[UPLOAD_HEAP], &desc,
                                                   D3D12_RESOURCE_STATE_COMMON, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
                                                   nullptr, //optimized clear value
-                                                  IID_PPV_ARGS(&resources.buffers[CONSTANT_BUFFER]));
+                                                  IID_PPV_ARGS(&resources.buffers[PER_FRAME_CONSTANT_BUFFER]));
     if(FAILED(hr)){
-    std::cerr<<"Error placement for constant buffer failed!";
+    std::cerr<<"Error placement for per frame constant buffer failed!";
     return;
     };
     UINT8* mappedData = nullptr;
-    resources.buffers[CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+    resources.buffers[PER_FRAME_CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
     UINT8* currentPtr = mappedData;
     for(UINT i = 0; i < data.PSPArray.count; i++){
         memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
         currentPtr += data.PSPArray.arr[i].size;
     }
-    float* f = reinterpret_cast<float*>(mappedData);
-    for (int i = 0; i < 16*4; ++i) {
-        if (i % 4 == 0) printf("\nvec%d: ", i/4);
-        printf("%f ", f[i]);
-    }
-    printf("\n");
-    resources.buffers[CONSTANT_BUFFER]->Unmap(0, nullptr);
+/*    float* f = reinterpret_cast<float*>(mappedData);
+        for (int i = 0; i < 16*4; ++i) {
+            if (i % 4 == 0) printf("\nvec%d: ", i/4);
+            printf("%f ", f[i]);
+        }
+        printf("\n");*/
+    resources.buffers[PER_FRAME_CONSTANT_BUFFER]->Unmap(0, nullptr);
     resources.heapOffsets[UPLOAD_HEAP] += 65536;
     D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {}; //We are assuming right now that we only have one constant buffer view..
-    cbvDesc.BufferLocation = resources.buffers[CONSTANT_BUFFER]->GetGPUVirtualAddress();
+    cbvDesc.BufferLocation = resources.buffers[PER_FRAME_CONSTANT_BUFFER]->GetGPUVirtualAddress();
     cbvDesc.SizeInBytes = 256;
     D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[SRV_CBV_UAV_DH]->GetCPUDescriptorHandleForHeapStart();
     UINT currentDescriptorHeapOffset = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
@@ -233,23 +233,103 @@ void Resource::initConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D
     resources.descriptorInHeapCount[SRV_CBV_UAV_DH]++;
 }
 
-void Resource::updateConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources){
+void Resource::updateConstantBuffer(const DataArray &data, bufferInfo buffer, const D3DGlobal &d3D, D3DResources &resources){
     UINT8* mappedData = nullptr;
-    resources.buffers[CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
-    UINT8* currentPtr = mappedData;
-    for(UINT i = 0; i < data.PSPArray.count; i++){
-        memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
-        currentPtr += data.PSPArray.arr[i].size;
+    if(buffer == PER_FRAME_CONSTANT_BUFFER){
+        resources.buffers[PER_FRAME_CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+        UINT8* currentPtr = mappedData;
+        for(UINT i = 0; i < data.PSPArray.count; i++){
+            memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
+            currentPtr += data.PSPArray.arr[i].size;
+        }
+/*    float* f = reinterpret_cast<float*>(mappedData);
+        for (int i = 0; i < 16*4; ++i) {
+            if (i % 4 == 0) printf("\nvec%d: ", i/4);
+            printf("%f ", f[i]);
+        }
+        printf("\n");*/
+        resources.buffers[PER_FRAME_CONSTANT_BUFFER]->Unmap(0, nullptr);
     }
-    float* f = reinterpret_cast<float*>(mappedData);
-    for (int i = 0; i < 16*4; ++i) {
-        if (i % 4 == 0) printf("\nvec%d: ", i/4);
-        printf("%f ", f[i]);
+
+    else if(buffer == PER_MODEL_CONSTANT_BUFFER){
+        resources.buffers[PER_MODEL_CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+        UINT8* currentPtr = mappedData;
+        for(UINT i = 0; i < data.PSPArray.count; i++){
+            memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
+            currentPtr += data.PSPArray.arr[i].size;
+        }
+/*    float* f = reinterpret_cast<float*>(mappedData);
+        for (int i = 0; i < 16*4; ++i) {
+            if (i % 4 == 0) printf("\nvec%d: ", i/4);
+            printf("%f ", f[i]);
+        }
+        printf("\n");*/
+        resources.buffers[PER_MODEL_CONSTANT_BUFFER]->Unmap(0, nullptr);
     }
-    printf("\n");
-    resources.buffers[CONSTANT_BUFFER]->Unmap(0, nullptr);
+
 }
 
+void Resource::initPerModelConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources){
+    UINT dataSize = 256; // Size per constant buffer
+    UINT numBuffers = data.PSPArray.count;
+    UINT totalSize = dataSize * numBuffers;
+    totalSize = (totalSize + 65535) & ~65535;
+    D3D12_RESOURCE_DESC desc = {};
+    DXGI_SAMPLE_DESC sampleDesc = {}; //Multisampling, mandatory to fill even for resources that don't make sense
+    sampleDesc.Count = 1;
+    sampleDesc.Quality = 0;
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; //Buffer resource, and not a texture resource
+    desc.Alignment = 0;
+    desc.Height = 1;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Format = DXGI_FORMAT_UNKNOWN; //Buffers are basically typeless
+    desc.SampleDesc = sampleDesc;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    desc.Width = totalSize;
+    HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[UPLOAD_HEAP].Get(),
+                                                  resources.heapOffsets[UPLOAD_HEAP], &desc,
+                                                  D3D12_RESOURCE_STATE_COMMON, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
+                                                  nullptr, //optimized clear value
+                                                  IID_PPV_ARGS(&resources.buffers[PER_MODEL_CONSTANT_BUFFER]));
+    if(FAILED(hr)){
+        std::cerr << "Error: placement for per model constant buffer failed!";
+        std::cerr <<"\n"<<hr;
+        return;
+    }
+
+    UINT8* mappedData = nullptr;
+    resources.buffers[PER_MODEL_CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+    //There will already be the camera and other constant data in the 0'th offset.
+    for(UINT i = 0; i < numBuffers; i++){
+        UINT8* destPtr = mappedData + (i * dataSize);
+        memcpy(destPtr, data.PSPArray.arr[i].data, 256);
+    }
+/*    float* f = reinterpret_cast<float*>(mappedData);
+        for (int i = 0; i < 16*4; ++i) {
+            if (i % 4 == 0) printf("\nvec%d: ", i/4);
+            printf("%f ", f[i]);
+        }
+        printf("\n");*/
+   resources.buffers[PER_MODEL_CONSTANT_BUFFER]->Unmap(0, nullptr);
+
+    D3D12_GPU_VIRTUAL_ADDRESS baseAddress = resources.buffers[PER_MODEL_CONSTANT_BUFFER]->GetGPUVirtualAddress();
+    UINT descriptorSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    for(UINT i = 0; i < numBuffers; i++){
+        D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+        cbvDesc.BufferLocation = baseAddress + (i * dataSize);
+        cbvDesc.SizeInBytes = dataSize;
+        // Get handle for this CBV in the bindless heap
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[SRV_CBV_UAV_DH]->GetCPUDescriptorHandleForHeapStart();
+        UINT offset = descriptorSize * (resources.descriptorInHeapCount[SRV_CBV_UAV_DH] + i);
+        handle.ptr += offset;
+        d3D.device->CreateConstantBufferView(&cbvDesc, handle);
+    }
+    resources.eachDescriptorCount[VIEW_CBV] = resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
+    resources.descriptorInHeapCount[SRV_CBV_UAV_DH] += numBuffers;
+    resources.heapOffsets[UPLOAD_HEAP] += totalSize;
+}
 
 void Resource::createBackBuffers(UINT width, UINT height, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources){
     Microsoft::WRL::ComPtr<ID3D12Resource> resource0;
@@ -537,12 +617,19 @@ void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResourc
     srvRange.RegisterSpace = 0;
     srvRange.OffsetInDescriptorsFromTableStart = 0;
 
-    D3D12_DESCRIPTOR_RANGE cbvRange = {};
-    cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    cbvRange.NumDescriptors = 100;
-    cbvRange.BaseShaderRegister = 0;
-    cbvRange.RegisterSpace = 0; // Different register space to avoid conflicts
-    cbvRange.OffsetInDescriptorsFromTableStart = 0;
+    D3D12_DESCRIPTOR_RANGE cbvRange0 = {};
+    cbvRange0.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+    cbvRange0.NumDescriptors = 100;
+    cbvRange0.BaseShaderRegister = 0;
+    cbvRange0.RegisterSpace = 0;
+    cbvRange0.OffsetInDescriptorsFromTableStart = 0;
+
+    D3D12_DESCRIPTOR_RANGE cbvRange1 = {};
+    cbvRange1.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+    cbvRange1.NumDescriptors = 100;
+    cbvRange1.BaseShaderRegister = 0;
+    cbvRange1.RegisterSpace = 1;
+    cbvRange1.OffsetInDescriptorsFromTableStart = 0;
 
     D3D12_DESCRIPTOR_RANGE samplerRange = {};
     samplerRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
@@ -555,9 +642,10 @@ void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResourc
     srvTable.NumDescriptorRanges = 1;
     srvTable.pDescriptorRanges = &srvRange;
 
+    D3D12_DESCRIPTOR_RANGE cbvRanges[2] = {cbvRange0, cbvRange1};
     D3D12_ROOT_DESCRIPTOR_TABLE cbvTable = {};
-    cbvTable.NumDescriptorRanges = 1;
-    cbvTable.pDescriptorRanges = &cbvRange;
+    cbvTable.NumDescriptorRanges = 2;
+    cbvTable.pDescriptorRanges = cbvRanges;
 
     D3D12_ROOT_DESCRIPTOR_TABLE samplerTable = {};
     samplerTable.NumDescriptorRanges = 1;
