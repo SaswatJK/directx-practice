@@ -16,6 +16,7 @@
 #include <cstring>
 #include <dxgi.h>
 #include <dxgi1_5.h>
+#include <filesystem>
 #include <wincrypt.h>
 #include <winuser.h>
 #include <wrl/client.h>
@@ -203,9 +204,9 @@ void Engine::prepareData(){
         2, 3, 0 //bottom right triangle
     };
     //NOTE: I should send this to other functions like camera functins and model functions so they can just slot their matrix in easily.
-    constantData = (char*)malloc(256);
-    memset(constantData, 0, 256);
-    glm::vec4* color = (glm::vec4*)constantData;
+    perFrameConstantData = (char*)malloc(256);
+    memset(perFrameConstantData, 0, 256);
+    glm::vec4* color = (glm::vec4*)perFrameConstantData;
     *color = {0.0f, 0.5f, 0.5f, 1.0f};
     glm::vec4* metallic = color + 1;
     *metallic = {1.0f, 0.2f, 0.0f, 1.0f};
@@ -217,7 +218,6 @@ void Engine::prepareData(){
     *viewMatR = tempViewMat4;
     glm::mat4* projMatR = viewMatR + 1;
     *projMatR = tempProjMat4;
-
     //*currentDrawIndex = {0, 0.0f, 0.0f, 0.0f};
     //glm::vec4* 
     int textureWidth, textureHeight, nrChannels;
@@ -226,44 +226,70 @@ void Engine::prepareData(){
     if (textureData == nullptr)
         std::cout<<"Texture data can't be opened in memory!";
     VertexSizePair triAndQuad[3]; //Makes them congiguous.
+    projMatR = projMatR + 1;
+    glm::vec4* viewPos = (glm::vec4*)projMatR;
+    *viewPos = camera->getVFront();
     Models firstModels;
     firstModels.loadModels("../resources/modelInfo.txt");
     unsigned int numOfModels = firstModels.models.size();
-    glm::mat4 tempModelMat4 = firstModels.models[0].modelMatrix;
-    glm::mat4* modelMatR = projMatR + 1;
-    *modelMatR = tempModelMat4;
-    modelMatR += 1;
-    glm::vec4* viewPos = (glm::vec4*)modelMatR;
-    *viewPos = camera->getVFront();
-
+    perModelConstantData = (char*)malloc(256 * numOfModels);
+    DataArray perModelData = {};
+    PtrSizePair* perModelPSP = new PtrSizePair[numOfModels]; //Cause array should be compile time.
+    glm::mat4* modelMatrixPtr = (glm::mat4*)perModelConstantData;
+    char* startPtr = perModelConstantData;
+    for(uint32_t i = 0; i < numOfModels; i++){
+        glm::mat4 tempModelMat4 = firstModels.models[i].modelMatrix;
+        char* newOffsettedPtr = (256 * i) + startPtr;
+        modelMatrixPtr = (glm::mat4*) newOffsettedPtr;
+        *modelMatrixPtr = tempModelMat4;
+        perModelPSP[i].data = modelMatrixPtr;
+        perModelPSP[i].size = sizeof(tempModelMat4);
+    }
+    perModelData.PSPArray.arr = perModelPSP;
+    perModelData.PSPArray.count = numOfModels;
+    std::cout<<"Num of models is: "<<numOfModels;
     triAndQuad[0].data = triangleVertices;
     triAndQuad[0].size = sizeof(triangleVertices);
     triAndQuad[1].data = quadVertices;
     triAndQuad[1].size = sizeof(quadVertices);
-    triAndQuad[2].data = firstModels.models[0].vertices.data();
-    triAndQuad[2].size = firstModels.models[0].vertices.size() * sizeof(Vertex);
+    std::vector<Vertex> allModelVertices;
+    for(uint32_t i = 0; i < numOfModels; i++){
+        allModelVertices.insert(allModelVertices.end(), 
+            firstModels.models[i].vertices.begin(),
+            firstModels.models[i].vertices.end());
+    }
+    triAndQuad[2].data = allModelVertices.data();
+    triAndQuad[2].size = allModelVertices.size() * sizeof(Vertex);
     DataArray vertexData = {};
     vertexData.VSPArray.arr = triAndQuad;
     vertexData.VSPArray.count = 3;
     PtrSizePair modelQuadIn[2];
-    modelQuadIn[0].data = firstModels.models[0].faces.data();
-    modelQuadIn[0].size = firstModels.models[0].faces.size() * sizeof(Face);
-    modelIndices.push_back(firstModels.models[0].faces.size() * 3);
+    std::vector<Face> allModelFaceIndices;
+    for(uint32_t i = 0; i < numOfModels; i++){
+        allModelFaceIndices.insert(allModelFaceIndices.end(),
+            firstModels.models[i].faces.begin(),
+            firstModels.models[i].faces.end());
+    }
+    modelQuadIn[0].data = allModelFaceIndices.data();
+    modelQuadIn[0].size = allModelFaceIndices.size() * sizeof(Face);
+    modelIndices.push_back(allModelFaceIndices.size() * 3);
     modelQuadIn[1].data = quadIndices;
     modelQuadIn[1].size = sizeof(quadIndices);
     DataArray indexData = {};
     indexData.PSPArray.arr = modelQuadIn;
     indexData.PSPArray.count = 2;
     //NOTE: Make constant buffer bigger through better offsetting and whatnot.
-    DataArray constantBufferData =  {};
-    PtrSizePair constantBufferPairs[1];
-    constantBufferPairs[0].data = constantData;
-    constantBufferPairs[0].size = 256;
-    constantBufferData.PSPArray.arr = constantBufferPairs;
-    constantBufferData.PSPArray.count = 1;
+    DataArray perFrameConstantBufferData =  {};
+    PtrSizePair perFrameConstantBufferPairs[1];
+    perFrameConstantBufferPairs[0].data = perFrameConstantData;
+    perFrameConstantBufferPairs[0].size = 256;
+    perFrameConstantBufferData.PSPArray.arr = perFrameConstantBufferPairs;
+    perFrameConstantBufferData.PSPArray.count = 1;
     UINT totalSizeByCount = (getVSPDataSize(vertexData)/65536) + 1;
     totalSizeByCount += (getPSPDataSize(indexData)/65536) + 1;
-    totalSizeByCount += (getPSPDataSize(constantBufferData)/65536) + 1;
+    totalSizeByCount += (getPSPDataSize(perFrameConstantBufferData)/65536) + 1;
+    totalSizeByCount += (getPSPDataSize(perModelData)/65536) + 1;
+    std::cout<<"The total size is going to be:"<<totalSizeByCount<<"\n";
     //Creating upload Heap.
     Heap::createHeap(totalSizeByCount, heapInfo::UPLOAD_HEAP, d3D, resource);
     //PrintDebugMessages();
@@ -293,7 +319,9 @@ void Engine::prepareData(){
     Heap::createDescriptorHeap(dhInfo::SAMPLER_DH, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
     Resource::createSimpleSampler(d3D, resource);
     Resource::init2DTexture(textureData, textureWidth, textureHeight, nrChannels, DXGI_FORMAT_R8G8B8A8_UNORM, fenceValue, d3D, resource);
-    Resource::initConstantBuffer(constantBufferData, d3D, resource);
+    constantBufferOffset = resource.descriptorInHeapCount[SRV_CBV_UAV_DH];
+    Resource::initPerFrameConstantBuffer(perFrameConstantBufferData, d3D, resource);
+    Resource::initPerModelConstantBuffer(perModelData, d3D, resource);
     //PrintDebugMessages();
     fenceValue++;
     //Creating a bindless root singature.
@@ -354,9 +382,9 @@ void Engine::render(){
         float xDirChange = 0;
         float yDirChange = 0;
         if(areDownMovement != 0 || areDownDirection != 0) {
-            DataArray constantBufferData = {};
+            DataArray perFrameConstantBufferData = {};
             PtrSizePair constantBufferPairs[1];
-            glm::vec4* start = (glm::vec4*)constantData;
+            glm::vec4* start = (glm::vec4*)perFrameConstantData;
             start += 2;
             glm::mat4* viewMat = (glm::mat4*)start;
             xMovChange = (areDownMovement & 0b01010000) ?
@@ -379,11 +407,11 @@ void Engine::render(){
             *viewMat = camera->getMatView();
             glm::mat4* projMat = viewMat + 1;
             *projMat = camera->getMatProj();
-            constantBufferPairs->data = constantData;
+            constantBufferPairs->data = perFrameConstantData;
             constantBufferPairs->size = 256;
-            constantBufferData.PSPArray.arr = constantBufferPairs;
-            constantBufferData.PSPArray.count = 1;
-            Resource::updateConstantBuffer(constantBufferData, d3D, resource);
+            perFrameConstantBufferData.PSPArray.arr = constantBufferPairs;
+            perFrameConstantBufferData.PSPArray.count = 1;
+            Resource::updateConstantBuffer(perFrameConstantBufferData, bufferInfo::PER_FRAME_CONSTANT_BUFFER, d3D, resource);
             }
         hr = d3D.commandAllocators[cmdAllocator::PRIMARY]->Reset();
         if(FAILED(hr)){
@@ -402,9 +430,11 @@ void Engine::render(){
         d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(0, //Root parameter index, base register + index (b0, b1, and dependingly...) in the shader. If range says 5 descriptors, then it will basically start from that base register range and from the uniform heap pointer, and then allocate 5 consecutive descriptors.
                                                                 resource.descriptorHeaps[SRV_CBV_UAV_DH]->GetGPUDescriptorHandleForHeapStart());
         resource.descriptorHeaps[0]->GetGPUDescriptorHandleForHeapStart();
-        D3D12_GPU_DESCRIPTOR_HANDLE gHandle = resource.descriptorHeaps[SRV_CBV_UAV_DH]->GetGPUDescriptorHandleForHeapStart();
-        gHandle.ptr += (UINT64)(d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * resource.eachDescriptorCount[VIEW_CBV]);
-        d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(1, gHandle);
+        D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle = resource.descriptorHeaps[SRV_CBV_UAV_DH]->GetGPUDescriptorHandleForHeapStart();
+        UINT descriptorSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        cbvHandle.ptr += descriptorSize * constantBufferOffset;
+        d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(1, cbvHandle);
+        //d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(1, gHandle);
         d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(2, resource.descriptorHeaps[SAMPLER_DH]->GetGPUDescriptorHandleForHeapStart());
         //Each 'slot' in the root parameter can hold anyting from one descriptor to descriptor tables. Each descriptor table can have multiple ranges. Where a range describes a contiguous block of descriptors of same type. Set a certain table. So this binds the 0'th table to the descriptorhandlestart.. So however it has defined it.
         D3D12_VIEWPORT viewPort = {}; //Viewport defines where we want to render to in the swapchain or the render target, whatever we are rendering to. So if I have a viewport of 500x500 in a 1000x1000 window, it will only render to the other 500x500

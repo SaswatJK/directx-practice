@@ -20,8 +20,10 @@ private:
     void PrintDebugMessages();
     UINT renderTextureOffset; //Offset in the texture2D array of 'd3d12 resource', which offset the render texture is in.
     UINT backBufferOffset; //Offset in the descriptorheaps for rtvs, where the descriptorheap of the the back buffer start. Atleast that's how these 2 are used right now. I forgot my own design decision.
+    UINT constantBufferOffset;
     UINT fenceValue = 1;
-    char* constantData;
+    char* perFrameConstantData;
+    char* perModelConstantData;
     std::vector<uint32_t> modelIndices;
     Camera* camera;
 //    SDL_WINDOW* window = nullptr;
