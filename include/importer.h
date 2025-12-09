@@ -18,7 +18,7 @@ public:
     // |E       |E (i - 2)  | E stands for summation.
     // n = 2    i = 2       |
     // Or simply put: NC3
-    void loadModel(std::string &modelPath, glm::vec3 worldPos, glm::vec3 worldRotate, glm::vec3 worldScale);
+    void loadModel(std::string &modelPath, glm::vec3 worldPos, glm::vec3 worldRotate, glm::vec3 worldScale, uint32_t modelIndex, uint32_t indicesOffset);
 };
 
 class Models{

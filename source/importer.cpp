@@ -7,7 +7,7 @@
 #include <sstream>
 #include <string>
 
-void Model::loadModel(std::string &modelPath, glm::vec3 worldPos, glm::vec3 worldRotate, glm::vec3 worldScale){
+void Model::loadModel(std::string &modelPath, glm::vec3 worldPos, glm::vec3 worldRotate, glm::vec3 worldScale, uint32_t modelIndex, uint32_t indicesOffset){
     std::vector<glm::vec4> normals;
     std::ifstream file(modelPath);
     std::string line;
@@ -41,7 +41,7 @@ void Model::loadModel(std::string &modelPath, glm::vec3 worldPos, glm::vec3 worl
                 tempNormal.x = v1;
                 tempNormal.y = v2;
                 tempNormal.z = v3;
-                tempNormal.w = 0.0;
+                tempNormal.w = modelIndex;
                 normals.push_back(tempNormal);
             }
             else if (identifier == "f"){
@@ -92,9 +92,9 @@ void Model::loadModel(std::string &modelPath, glm::vec3 worldPos, glm::vec3 worl
                     vertexInfo.push_back(79);
 
                 }
-                tempFace.indices[0] = groupNumbers[0];
-                tempFace.indices[1] = groupNumbers[3];
-                tempFace.indices[2] = groupNumbers[6];
+                tempFace.indices[0] = groupNumbers[0] + indicesOffset;
+                tempFace.indices[1] = groupNumbers[3] + indicesOffset;
+                tempFace.indices[2] = groupNumbers[6] + indicesOffset;
                 faces.push_back(tempFace);
             }
         }
@@ -154,8 +154,10 @@ void Models::loadModels(const std::string &modelInfoPath){
             modelWorldScl.push_back(tempWorldScl);
         }
     }
-    models.reserve(actualPath.size());
+    models.resize(actualPath.size());
+    uint32_t modelIndicesOffset = 0;
     for(size_t i = 0; i < actualPath.size(); i++){
-        models[i].loadModel(actualPath[i], modelWorldPos[i], modelWorldRot[i], modelWorldScl[i]);
+        models[i].loadModel(actualPath[i], modelWorldPos[i], modelWorldRot[i], modelWorldScl[i], i, modelIndicesOffset);
+        modelIndicesOffset += (models[i].faces.size() * 3);
     }
 }
