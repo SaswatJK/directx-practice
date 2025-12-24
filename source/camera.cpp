@@ -1,12 +1,18 @@
 #include "../include/camera.h"
 #include "glm/ext/matrix_clip_space.hpp"
+#include "glm/ext/matrix_transform.hpp"
 #include "glm/geometric.hpp"
+#include "glm/trigonometric.hpp"
 
 Camera::Camera(glm::vec3 initPos, glm::vec3 initDir, glm::vec3 initUp) : vEye(initPos), vFront(initDir), vUp(initUp) {
     glm::vec3 targetPos = vEye + vFront;
     vRight = glm::normalize(glm::cross(vFront, vUp));
     matView = glm::lookAtRH(vEye, targetPos, vUp);
     matProj = glm::perspectiveRH_ZO(float(glm::radians(60.0f)), 1.0f, 0.1f, 10000.0f); //could make my own frustum but this is far simpler and more effective afaik
+    glm::vec3 sunPos = {-20, 50, 0};
+    matTestProj = glm::perspectiveRH_ZO(float(glm::radians(30.0f)), 0.5f, 0.1f, 10000.0f);
+    matTestView = glm::lookAtRH(sunPos, targetPos, vUp);
+
 }
 void Camera::updateCamera(glm::vec3 changePos, glm::vec3 changeDir, glm::vec3 changeUp) {
     float yaw = changeDir.x;

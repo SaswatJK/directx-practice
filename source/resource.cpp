@@ -45,11 +45,11 @@ void Heap::createHeap(UINT size, heapInfo heap, const D3DGlobal &d3D, D3DResourc
     UINT heapSizeByCount = size;
     D3D12_HEAP_DESC desc;
     switch(heap) {
-        case UPLOAD_HEAP:
+        case heapInfo::HEAP_UPLOAD:
             desc.Properties = uploadHeapProperties;
                 heapSize = 65536 * heapSizeByCount;
             break;
-        case DEFAULT_HEAP:
+        case heapInfo::HEAP_DEFAULT:
             desc.Properties = defaultHeapProperties;
             break;
         default:
@@ -98,25 +98,25 @@ void Resource::initVertexBuffer(const DataArray &data, const D3DGlobal &d3D, D3D
     desc.Width = dataSize;
     //Committed resource is the easiest way to create resource since we don't need to do heap management ourselves.
     //I wanted to use ID3D12Resource2 but it's so unimportant that these guys didn't even document it properly, there's no links to new features or to the old interface it has inherited from LMFAO. CreateCommittedResource3 uses layout rather than states for barriers and stuff, which should give more control for the memory of both GPU, CPU, and the access of either/or memory from either/or physical hardware (host or device), so does CreatePlacedResource2, while CreatePlacedResource1 looks for desc_1 rather than desc for resources.
-    HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[UPLOAD_HEAP].Get(),
-                                                  resources.heapOffsets[UPLOAD_HEAP], &desc,
+    HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[heapInfo::HEAP_UPLOAD].Get(),
+                                                  resources.heapOffsets[heapInfo::HEAP_UPLOAD], &desc,
                                                   D3D12_RESOURCE_STATE_COMMON, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
                                                   nullptr, //optimized clear value
-                                                  IID_PPV_ARGS(&resources.buffers[VERTEX_BUFFER]));
+                                                  IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_VERTEX]));
     if(FAILED(hr)){
     std::cerr<<"Error placement for vertex buffer failed!";
     return;
     };
     UINT8* mappedData = nullptr;
-    resources.buffers[VERTEX_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)); //Mapping the vertex buffer resource to the GPU memory.
+    resources.buffers[bufferInfo::BUFFER_VERTEX]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)); //Mapping the vertex buffer resource to the GPU memory.
     UINT8* currentPtr = mappedData; //Current pointer in the GPU.
     for(UINT i = 0; i < data.VSPArray.count; i++){ //Going through each pointer to different vertex arrays.
         memcpy(currentPtr, data.VSPArray.arr[i].data, data.VSPArray.arr[i].size); //Copying each, which is of unique sizes.
         currentPtr += data.VSPArray.arr[i].size; //Moving the pointer in the GPU to a new freed space.
     }
-    resources.buffers[VERTEX_BUFFER]->Unmap(0, nullptr);
+    resources.buffers[bufferInfo::BUFFER_VERTEX]->Unmap(0, nullptr);
     uint32_t newOffset = desc.Width / 65536  + 1;
-    resources.heapOffsets[UPLOAD_HEAP] += (newOffset * 65536);
+    resources.heapOffsets[heapInfo::HEAP_UPLOAD] += (newOffset * 65536);
     //we craete views here as well yipee.
     D3D12_VERTEX_BUFFER_VIEW vbView = {}; //I have to store these views as well... HMM
     vbView.StrideInBytes = sizeof(Vertex);
@@ -124,7 +124,7 @@ void Resource::initVertexBuffer(const DataArray &data, const D3DGlobal &d3D, D3D
     resources.vbViews.resize(data.VSPArray.count);
     for(UINT i = 0; i < data.VSPArray.count; i++){
         vbView.SizeInBytes = data.VSPArray.arr[i].size;
-        vbView.BufferLocation = resources.buffers[VERTEX_BUFFER]->GetGPUVirtualAddress() + previousOffset;
+        vbView.BufferLocation = resources.buffers[bufferInfo::BUFFER_VERTEX]->GetGPUVirtualAddress() + previousOffset;
         previousOffset += data.VSPArray.arr[i].size;
         resources.vbViews[i] = vbView;
     }
@@ -147,32 +147,32 @@ void Resource::initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DR
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
     dataSize = getPSPDataSize(data);
     desc.Width = dataSize;
-    HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[UPLOAD_HEAP].Get(),
-                                                  resources.heapOffsets[UPLOAD_HEAP], &desc,
+    HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[heapInfo::HEAP_UPLOAD].Get(),
+                                                  resources.heapOffsets[heapInfo::HEAP_UPLOAD], &desc,
                                                   D3D12_RESOURCE_STATE_COMMON, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
                                                   nullptr, //optimized clear value
-                                                  IID_PPV_ARGS(&resources.buffers[INDEX_BUFFER]));
+                                                  IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_INDEX]));
     if(FAILED(hr)){
     std::cerr<<"Error placement for index buffer failed!";
     return;
     };
     UINT8* mappedData = nullptr;
-    resources.buffers[INDEX_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+    resources.buffers[bufferInfo::BUFFER_INDEX]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
     UINT8* currentPtr = mappedData;
     for(UINT i = 0; i < data.PSPArray.count; i++){
         memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
         currentPtr += data.PSPArray.arr[i].size;
     }
-    resources.buffers[INDEX_BUFFER]->Unmap(0, nullptr);
+    resources.buffers[bufferInfo::BUFFER_INDEX]->Unmap(0, nullptr);
     uint32_t newOffset = desc.Width / 65536  + 1;
-    resources.heapOffsets[UPLOAD_HEAP] += (newOffset * 65536);
     D3D12_INDEX_BUFFER_VIEW ibView = {};
+    resources.heapOffsets[heapInfo::HEAP_UPLOAD] += (newOffset * 65536);
     ibView.Format = DXGI_FORMAT_R32_UINT;
     UINT previousOffset = 0;
     resources.ibViews.resize(data.PSPArray.count);
     for(UINT i = 0; i < data.PSPArray.count; i++){
         ibView.SizeInBytes = data.PSPArray.arr[i].size;
-        ibView.BufferLocation = resources.buffers[INDEX_BUFFER]->GetGPUVirtualAddress() + previousOffset;
+        ibView.BufferLocation = resources.buffers[bufferInfo::BUFFER_INDEX]->GetGPUVirtualAddress() + previousOffset;
         previousOffset += data.PSPArray.arr[i].size;
         resources.ibViews[i] = ibView;
     }
@@ -194,17 +194,17 @@ void Resource::initPerFrameConstantBuffer(const DataArray &data, const D3DGlobal
     desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
     desc.Width = dataSize;
-    HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[UPLOAD_HEAP].Get(),
-                                                  resources.heapOffsets[UPLOAD_HEAP], &desc,
+    HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[heapInfo::HEAP_UPLOAD].Get(),
+                                                  resources.heapOffsets[heapInfo::HEAP_UPLOAD], &desc,
                                                   D3D12_RESOURCE_STATE_COMMON, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
                                                   nullptr, //optimized clear value
-                                                  IID_PPV_ARGS(&resources.buffers[PER_FRAME_CONSTANT_BUFFER]));
+                                                  IID_PPV_ARGS(&resources.buffers[BUFFER_PER_FRAME_CONSTANT]));
     if(FAILED(hr)){
     std::cerr<<"Error placement for per frame constant buffer failed!";
     return;
     };
     UINT8* mappedData = nullptr;
-    resources.buffers[PER_FRAME_CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+    resources.buffers[BUFFER_PER_FRAME_CONSTANT]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
     UINT8* currentPtr = mappedData;
     for(UINT i = 0; i < data.PSPArray.count; i++){
         memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
@@ -216,27 +216,27 @@ void Resource::initPerFrameConstantBuffer(const DataArray &data, const D3DGlobal
             printf("%f ", f[i]);
         }
         printf("\n");*/
-    resources.buffers[PER_FRAME_CONSTANT_BUFFER]->Unmap(0, nullptr);
-    resources.heapOffsets[UPLOAD_HEAP] += 65536;
+    resources.buffers[BUFFER_PER_FRAME_CONSTANT]->Unmap(0, nullptr);
+    resources.heapOffsets[heapInfo::HEAP_UPLOAD] += 65536;
     D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {}; //We are assuming right now that we only have one constant buffer view..
-    cbvDesc.BufferLocation = resources.buffers[PER_FRAME_CONSTANT_BUFFER]->GetGPUVirtualAddress();
+    cbvDesc.BufferLocation = resources.buffers[BUFFER_PER_FRAME_CONSTANT]->GetGPUVirtualAddress();
     cbvDesc.SizeInBytes = 256;
-    D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[SRV_CBV_UAV_DH]->GetCPUDescriptorHandleForHeapStart();
-    UINT currentDescriptorHeapOffset = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetCPUDescriptorHandleForHeapStart();
+    UINT currentDescriptorHeapOffset = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
     handle.ptr += currentDescriptorHeapOffset;
     d3D.device->CreateConstantBufferView(&cbvDesc,
                                          handle//Describes the CPU descriptor handle that representes the start of the heap that holds the constant buffer view. This is a pointer or handle that the CPU uses to access and write into the descriptor heap memory. When you create or update a descriptor (like a constant buffer view), the CPU needs to write the descriptor data into the heap. So you get a CPU handle to specify exactly where in the heap to write this descriptor. This handle is valid and usable only on the CPU side, allowing you to fill in descriptor information.
                                          //Simplest way to say it, we are getting the location of the first descriptor of many (if there are more than 1), in the descriptor heap. Right now it's the start of the descriptor heap, now imagine we wanted another descriptor of the same type in the heap, to create the 'view', we would have to increment this handle to the next descriptor 'slot' in the descriptor heap. When we call functions like CreateShaderResourceView or CreateConstantBufferView, we pass a CPU descriptor handle to specify exactly where in the heap the new descriptor should be written. Later, when binding descriptors to the GPU pipeline, we use GPU descriptor handles to tell the GPU where to find these descriptors during execution.
                                          //It's because the descriptor heap is in the CPU accessible memory while what it's ponting to is in the GPU, which is why descriptors/views use gpuvirtualaddress for pointing to a buffer that is committed to the GPU memory, but we use cpuhandle for the memory for the descriptors themselves.
                                          );
-    resources.eachDescriptorCount[VIEW_CBV] = resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
-    resources.descriptorInHeapCount[SRV_CBV_UAV_DH]++;
+    resources.eachDescriptorCount[viewInfo::VIEW_CBV] = resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+    resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV]++;
 }
 
 void Resource::updateConstantBuffer(const DataArray &data, bufferInfo buffer, const D3DGlobal &d3D, D3DResources &resources){
     UINT8* mappedData = nullptr;
-    if(buffer == PER_FRAME_CONSTANT_BUFFER){
-        resources.buffers[PER_FRAME_CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+    if(buffer == BUFFER_PER_FRAME_CONSTANT){
+        resources.buffers[BUFFER_PER_FRAME_CONSTANT]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
         UINT8* currentPtr = mappedData;
         for(UINT i = 0; i < data.PSPArray.count; i++){
             memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
@@ -248,11 +248,11 @@ void Resource::updateConstantBuffer(const DataArray &data, bufferInfo buffer, co
             printf("%f ", f[i]);
         }
         printf("\n");*/
-        resources.buffers[PER_FRAME_CONSTANT_BUFFER]->Unmap(0, nullptr);
+        resources.buffers[BUFFER_PER_FRAME_CONSTANT]->Unmap(0, nullptr);
     }
 
-    else if(buffer == PER_MODEL_CONSTANT_BUFFER){
-        resources.buffers[PER_MODEL_CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+    else if(buffer == bufferInfo::BUFFER_PER_MODEL_CONSTANT){
+        resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
         UINT8* currentPtr = mappedData;
         for(UINT i = 0; i < data.PSPArray.count; i++){
             memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
@@ -264,7 +264,7 @@ void Resource::updateConstantBuffer(const DataArray &data, bufferInfo buffer, co
             printf("%f ", f[i]);
         }
         printf("\n");*/
-        resources.buffers[PER_MODEL_CONSTANT_BUFFER]->Unmap(0, nullptr);
+        resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Unmap(0, nullptr);
     }
 
 }
@@ -288,11 +288,11 @@ void Resource::initPerModelConstantBuffer(const DataArray &data, const D3DGlobal
     desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     desc.Flags = D3D12_RESOURCE_FLAG_NONE;
     desc.Width = totalSize;
-    HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[UPLOAD_HEAP].Get(),
-                                                  resources.heapOffsets[UPLOAD_HEAP], &desc,
+    HRESULT hr = d3D.device->CreatePlacedResource(resources.heaps[heapInfo::HEAP_UPLOAD].Get(),
+                                                  resources.heapOffsets[heapInfo::HEAP_UPLOAD], &desc,
                                                   D3D12_RESOURCE_STATE_COMMON, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
                                                   nullptr, //optimized clear value
-                                                  IID_PPV_ARGS(&resources.buffers[PER_MODEL_CONSTANT_BUFFER]));
+                                                  IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]));
     if(FAILED(hr)){
         std::cerr << "Error: placement for per model constant buffer failed!";
         std::cerr <<"\n"<<hr;
@@ -300,7 +300,7 @@ void Resource::initPerModelConstantBuffer(const DataArray &data, const D3DGlobal
     }
 
     UINT8* mappedData = nullptr;
-    resources.buffers[PER_MODEL_CONSTANT_BUFFER]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+    resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
     //There will already be the camera and other constant data in the 0'th offset.
     for(UINT i = 0; i < numBuffers; i++){
         UINT8* destPtr = mappedData + (i * dataSize);
@@ -312,23 +312,23 @@ void Resource::initPerModelConstantBuffer(const DataArray &data, const D3DGlobal
             printf("%f ", f[i]);
         }
         printf("\n");*/
-   resources.buffers[PER_MODEL_CONSTANT_BUFFER]->Unmap(0, nullptr);
+   resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Unmap(0, nullptr);
 
-    D3D12_GPU_VIRTUAL_ADDRESS baseAddress = resources.buffers[PER_MODEL_CONSTANT_BUFFER]->GetGPUVirtualAddress();
+    D3D12_GPU_VIRTUAL_ADDRESS baseAddress = resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->GetGPUVirtualAddress();
     UINT descriptorSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     for(UINT i = 0; i < numBuffers; i++){
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
         cbvDesc.BufferLocation = baseAddress + (i * dataSize);
         cbvDesc.SizeInBytes = dataSize;
         // Get handle for this CBV in the bindless heap
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[SRV_CBV_UAV_DH]->GetCPUDescriptorHandleForHeapStart();
-        UINT offset = descriptorSize * (resources.descriptorInHeapCount[SRV_CBV_UAV_DH] + i);
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetCPUDescriptorHandleForHeapStart();
+        UINT offset = descriptorSize * (resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV] + i);
         handle.ptr += offset;
         d3D.device->CreateConstantBufferView(&cbvDesc, handle);
     }
-    resources.eachDescriptorCount[VIEW_CBV] = resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
-    resources.descriptorInHeapCount[SRV_CBV_UAV_DH] += numBuffers;
-    resources.heapOffsets[UPLOAD_HEAP] += totalSize;
+    resources.eachDescriptorCount[viewInfo::VIEW_CBV] = resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+    resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV] += numBuffers;
+    resources.heapOffsets[heapInfo::HEAP_UPLOAD] += totalSize;
 }
 
 void Resource::createBackBuffers(UINT width, UINT height, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources){
@@ -337,9 +337,9 @@ void Resource::createBackBuffers(UINT width, UINT height, DXGI_FORMAT format, co
     UINT bb0Pos = resources.texture2Ds.size();
     resources.texture2Ds.push_back(resource0);
     resources.texture2Ds.push_back(resource1);
-    D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[RTV_DH]->GetCPUDescriptorHandleForHeapStart(); //Start of the descriptor heap of that type.
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[dhInfo::DH_RTV]->GetCPUDescriptorHandleForHeapStart(); //Start of the descriptor heap of that type.
     UINT descriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV); //Increment size for each of the descriptor. The function returns the size of the handle increment for the given type of descriptor heap, including any necessary padding
-    UINT currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[RTV_DH]; //We are getting the offset to the current descriptor.
+    UINT currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[dhInfo::DH_RTV]; //We are getting the offset to the current descriptor.
     handle.ptr += currentDescriptorHeapOffset;
     for (UINT i = 0; i < 2; i++){
         d3D.xSwapChain->GetBuffer(i, IID_PPV_ARGS(&resources.texture2Ds[bb0Pos + i]));//Basically since our render textures have not been described till now, we use this to get the swapchain buffer, with it's properties and everything and we give it to the render texture. Calling GetBuffer returns a fully described resource created and managed by the swap chain.
@@ -347,8 +347,8 @@ void Resource::createBackBuffers(UINT width, UINT height, DXGI_FORMAT format, co
                                            nullptr, //We don't need to make a render_target_view_desc, it will inherit the importnat values like size and format and fill in defaults
                                            handle);
         handle.ptr += descriptorIncrementSize;
-        resources.eachDescriptorCount[VIEW_RTV] = resources.descriptorInHeapCount[RTV_DH];
-        resources.descriptorInHeapCount[RTV_DH]++;
+        resources.eachDescriptorCount[viewInfo::VIEW_RTV] = resources.descriptorInHeapCount[dhInfo::DH_RTV];
+        resources.descriptorInHeapCount[dhInfo::DH_RTV]++;
     }
 }
 
@@ -392,12 +392,12 @@ void Resource::createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, tex
         rtvDesc.Texture2D = tex2Drtv;
         rtvDesc.Format = format;
         rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[RTV_DH]->GetCPUDescriptorHandleForHeapStart(); //Start of the descriptor heap of that type.
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[dhInfo::DH_RTV]->GetCPUDescriptorHandleForHeapStart(); //Start of the descriptor heap of that type.
         UINT descriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV); //Increment size for each of the descriptor. The function returns the size of the handle increment for the given type of descriptor heap, including any necessary padding
-        UINT currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[RTV_DH]; //We are getting the offset to the current descriptor.
+        UINT currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[dhInfo::DH_RTV]; //We are getting the offset to the current descriptor.
         handle.ptr += currentDescriptorHeapOffset;
         d3D.device->CreateRenderTargetView(resources.texture2Ds.back().Get(), &rtvDesc, handle);
-        resources.descriptorInHeapCount[RTV_DH]++;
+        resources.descriptorInHeapCount[dhInfo::DH_RTV]++;
 
         D3D12_TEX2D_SRV tex2Dsrv = {};
         tex2Dsrv.MipLevels = 1;
@@ -411,13 +411,13 @@ void Resource::createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, tex
         srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 
-        handle = resources.descriptorHeaps[SRV_CBV_UAV_DH]->GetCPUDescriptorHandleForHeapStart();
+        handle = resources.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetCPUDescriptorHandleForHeapStart();
         descriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
+        currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
         handle.ptr += currentDescriptorHeapOffset;
         d3D.device->CreateShaderResourceView(resources.texture2Ds.back().Get(), &srvDesc, handle);
-        resources.eachDescriptorCount[VIEW_SRV] = resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
-        resources.descriptorInHeapCount[SRV_CBV_UAV_DH]++;
+        resources.eachDescriptorCount[viewInfo::VIEW_SRV] = resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+        resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV]++;
     }
     if(texType == textureTypeInfo::TEX_TYPE_DEPTH){
         optimizedClearValue.Format = format;
@@ -429,9 +429,9 @@ void Resource::createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, tex
             std::cerr<<"Texture: "<<resources.texture2Ds.size()<<" upload failed!";
             return;
         }
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[DSV_DH]->GetCPUDescriptorHandleForHeapStart(); //Start of the descriptor heap of that type.
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[dhInfo::DH_DSV]->GetCPUDescriptorHandleForHeapStart(); //Start of the descriptor heap of that type.
         UINT descriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV); //Increment size for each of the descriptor. The function returns the size of the handle increment for the given type of descriptor heap, including any necessary padding
-        UINT currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[DSV_DH]; //We are getting the offset to the current descriptor.
+        UINT currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[dhInfo::DH_DSV]; //We are getting the offset to the current descriptor.
         handle.ptr += currentDescriptorHeapOffset;
         D3D12_TEX2D_DSV tex2Ddsv = {};
         tex2Ddsv.MipSlice = 0;
@@ -442,8 +442,8 @@ void Resource::createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, tex
         dsvDesc.Flags = D3D12_DSV_FLAG_NONE;
         dsvDesc.Texture2D = tex2Ddsv;
         d3D.device->CreateDepthStencilView(resources.texture2Ds.back().Get(), &dsvDesc, handle);
-        resources.eachDescriptorCount[VIEW_DSV] = resources.descriptorInHeapCount[DSV_DH];
-        resources.descriptorInHeapCount[DSV_DH]++;
+        resources.eachDescriptorCount[viewInfo::VIEW_DSV] = resources.descriptorInHeapCount[dhInfo::DH_DSV];
+        resources.descriptorInHeapCount[dhInfo::DH_DSV]++;
     }
 }
 
@@ -576,13 +576,13 @@ void Resource::init2DTexture(void* data, UINT width, UINT height, UINT nrChannel
     texSRV.PlaneSlice = 0;
     texSRV.ResourceMinLODClamp = 0.0f;
     texView.Texture2D = texSRV;
-    D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[SRV_CBV_UAV_DH]->GetCPUDescriptorHandleForHeapStart();
-    UINT currentDescriptorHeapOffset = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetCPUDescriptorHandleForHeapStart();
+    UINT currentDescriptorHeapOffset = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) * resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
     handle.ptr += currentDescriptorHeapOffset;
     d3D.device->CreateShaderResourceView(resources.texture2Ds.back().Get(), &texView, handle);
     //tempUploadBuffer->Release();
-    resources.eachDescriptorCount[VIEW_SRV] = resources.descriptorInHeapCount[SRV_CBV_UAV_DH];
-    resources.descriptorInHeapCount[SRV_CBV_UAV_DH]++;
+    resources.eachDescriptorCount[viewInfo::VIEW_SRV] = resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+    resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV]++;
 }
 
 void Resource::createSimpleSampler(const D3DGlobal &d3D, D3DResources &resources){
@@ -596,12 +596,12 @@ void Resource::createSimpleSampler(const D3DGlobal &d3D, D3DResources &resources
     desc.MipLODBias = 0.0f;
     desc.MaxAnisotropy = 1;
     desc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-    D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[SAMPLER_DH]->GetCPUDescriptorHandleForHeapStart(); //Start of the descriptor heap of that type.
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[dhInfo::DH_SAMPLER]->GetCPUDescriptorHandleForHeapStart(); //Start of the descriptor heap of that type.
     UINT descriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER); //Increment size for each of the descriptor. The function returns the size of the handle increment for the given type of descriptor heap, including any necessary padding.
-    UINT currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[SAMPLER_DH]; //We are getting the offset to the current descriptor.
+    UINT currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[dhInfo::DH_SAMPLER]; //We are getting the offset to the current descriptor.
     handle.ptr += currentDescriptorHeapOffset;
     d3D.device->CreateSampler(&desc, handle);
-    resources.descriptorInHeapCount[SAMPLER_DH]++;
+    resources.descriptorInHeapCount[dhInfo::DH_SAMPLER]++;
 }
 
 void Resource::createSimpleDepthStencil(UINT width, UINT height, const D3DGlobal &d3D, D3DResources &resources){

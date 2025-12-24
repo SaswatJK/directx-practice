@@ -26,6 +26,7 @@
 #include <glm/common.hpp>
 #include <glm/ext.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <wrl/client.h>
 
 typedef enum {
     PRIMARY = 0,
@@ -38,30 +39,32 @@ typedef enum {
 }cmdList;
 
 typedef enum {
-    UPLOAD_HEAP = 0,
-    DEFAULT_HEAP,
+    HEAP_UPLOAD = 0,
+    HEAP_DEFAULT,
     HEAP_COUNT
 }heapInfo;
 
 typedef enum {
-    RENDER_PSO = 0,
-    PRESENT_PSO,
+    PSO_RENDER = 0,
+    PSO_RAYTRACING,
+    PSO_PRESENT,
     PSO_COUNT
 }psoInfo;
 
 typedef enum {
-    VERTEX_BUFFER = 0, //Will upload all vertex buffers in teh same resource, and the views will differentiate, am not gonnna do much premature optimisations right now.
-    INDEX_BUFFER,
-    PER_FRAME_CONSTANT_BUFFER,
-    PER_MODEL_CONSTANT_BUFFER,
+    BUFFER_VERTEX = 0, //Will upload all vertex buffers in teh same resource, and the views will differentiate, am not gonnna do much premature optimisations right now.
+    BUFFER_INDEX,
+    BUFFER_PER_FRAME_CONSTANT,
+    BUFFER_PER_MODEL_CONSTANT,
     BUFFER_COUNT
 }bufferInfo;
 
 typedef enum {
-    SRV_CBV_UAV_DH = 0,
-    RTV_DH,
-    SAMPLER_DH,
-    DSV_DH,
+    DH_SRV_CBV_UAV = 0,
+    DH_RTV,
+    DH_SAMPLER,
+    DH_DSV,
+    DH_IMGUI_SRV,
     DH_COUNT
 }dhInfo;
 
@@ -98,17 +101,17 @@ typedef struct{
 
 //ALl have 8 byte alignment.
 typedef struct D3DResourceStruct{
-    Microsoft::WRL::ComPtr<ID3D12Heap> heaps[HEAP_COUNT]; //All the heaps that will be used at once.
-    Microsoft::WRL::ComPtr<ID3D12Resource> buffers[BUFFER_COUNT]; //All the buffer resources that will be used at once.
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptorHeaps[DH_COUNT]; //All the descriptor heaps that will be used at once.
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineStates[PSO_COUNT];
+    Microsoft::WRL::ComPtr<ID3D12Heap> heaps[heapInfo::HEAP_COUNT]; //All the heaps that will be used at once.
+    Microsoft::WRL::ComPtr<ID3D12Resource> buffers[bufferInfo::BUFFER_COUNT]; //All the buffer resources that will be used at once.
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptorHeaps[dhInfo::DH_COUNT]; //All the descriptor heaps that will be used at once.
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineStates[psoInfo::PSO_COUNT];
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> texture2Ds; //All the textures that will be used at once.
     Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature; // I think I can get away with only one root signature because of bindless.
     std::vector<D3D12_VERTEX_BUFFER_VIEW> vbViews;
     std::vector<D3D12_INDEX_BUFFER_VIEW> ibViews;
-    UINT32 heapOffsets[HEAP_COUNT] = {0};
-    UINT32 descriptorInHeapCount[DH_COUNT] = {0};
-    UINT32 eachDescriptorCount[VIEW_COUNT] = {0};
+    UINT32 heapOffsets[heapInfo::HEAP_COUNT] = {0};
+    UINT32 descriptorInHeapCount[dhInfo::DH_COUNT] = {0};
+    UINT32 eachDescriptorCount[viewInfo::VIEW_COUNT] = {0};
 }D3DResources;
 
 typedef struct D3DGlobalStruct{ //prefix of x meaning it's dxgi
@@ -123,8 +126,8 @@ typedef struct D3DGlobalStruct{ //prefix of x meaning it's dxgi
     // Command allocators are not free-threaded; that is, multiple threads may notshare the same command allocator and call its methods concurrently. So generally, each thread will get its own command allocator.
     // The command queue is free-threaded, so multiple threads can access the command queue and call its methods concurrently. In particular, each thread can submit their generated command list to the thread queue concurrently.
     // For performance reasons, the application must specify at initialization time the maximum number of command lists they will record concurrently.
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocators[ALLOCATOR_COUNT];
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList10> commandLists[LIST_COUNT];
+    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocators[cmdAllocator::ALLOCATOR_COUNT];
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList10> commandLists[cmdList::LIST_COUNT];
     Microsoft::WRL::ComPtr<ID3D12Fence1> fence;
     HANDLE fenceEvent;
 }D3DGlobal;

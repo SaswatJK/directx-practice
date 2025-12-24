@@ -1,25 +1,24 @@
 #include "../include/graphics.h"
 #include "../include/resource.h"
 #include "../include/importer.h"
-#include "D3D12/d3d12.h"
-#include "D3D12/d3dcommon.h"
-#include "D3D12/dxgiformat.h"
-#include "SDL3/SDL_events.h"
-#include "SDL3/SDL_video.h"
+#include "../include/imgui.h"
+#include "../include/imgui_impl_sdl3.h"
+#include "../include/imgui_impl_dx12.h"
 #include "camera.h"
 #include "glm/detail/qualifier.hpp"
 #include "glm/ext/matrix_float4x4.hpp"
-#include "shader.h"
-#include "utils.h"
+#include "../include/shader.h"
+#include "../include/utils.h"
+#include "../include/D3D12/d3d12.h"
+#include "../include/D3D12/d3dcommon.h"
+#include "../include/D3D12/dxgiformat.h"
+#include "../include/SDL3/SDL_events.h"
+#include "../include/SDL3/SDL_video.h"
 #include <combaseapi.h>
 #include <cstdlib>
 #include <cstring>
 #include <dxgi.h>
 #include <dxgi1_5.h>
-#include <filesystem>
-#include <wincrypt.h>
-#include <winuser.h>
-#include <wrl/client.h>
 #include <windows.h>
 #include <glm/gtc/matrix_access.hpp>
 
@@ -141,12 +140,12 @@ Engine::Engine(){
                                        D3D12_COMMAND_LIST_TYPE_DIRECT,
                                        d3D.commandAllocators[PRIMARY].Get(),
                                        nullptr,
-                                       IID_PPV_ARGS(&d3D.commandLists[RENDER]));
+                                       IID_PPV_ARGS(&d3D.commandLists[cmdList::RENDER]));
     if(FAILED(hr)){
         std::cout<<"Triangle Command list creation failed!";
         return;
     }
-    //d3D.commandLists[RENDER]->Close();
+    //d3D.commandLists[cmdList::RENDER]->Close();
     //Synchronization. Why it's important. So the GPU and CPU are both working simulatenously, however, we don't want one to overtake the other, we don't want the CPU to overtake and change the PSO before the frame has been completed by the GPU and cause errors, and we don't want the GPU to start making frames before updating uniforms and stuff by the CPU.
     //A fence is one of the most simple synchronization objects. It exists in both the CPU and the GPU. It has an internal integer counter, and can trigger events on either the GPU or the GPU when the counter reached a certain value, that we can specify.
     //This can be done to trigger an event on the CPU when a command allocator's commands have been executed fully, or we can have the GPU wait while the CPU is completing a certain operation first, or we can get the command queues (if multiple exists), on the GPU to wait upon one another.
@@ -291,35 +290,36 @@ void Engine::prepareData(){
     totalSizeByCount += (getPSPDataSize(perModelData)/65536) + 1;
     std::cout<<"The total size is going to be:"<<totalSizeByCount<<"\n";
     //Creating upload Heap.
-    Heap::createHeap(totalSizeByCount, heapInfo::UPLOAD_HEAP, d3D, resource);
+    Heap::createHeap(totalSizeByCount, heapInfo::HEAP_UPLOAD, d3D, resource);
     //PrintDebugMessages();
     //Creating a descriptor heap for the srvs and cbvs.
-    Heap::createDescriptorHeap(dhInfo::SRV_CBV_UAV_DH, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
+    Heap::createDescriptorHeap(dhInfo::DH_SRV_CBV_UAV, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
     //PrintDebugMessages();
     //Creating the vertex and index buffer.
     Resource::initVertexBuffer(vertexData, d3D, resource);
     //PrintDebugMessages();
     Resource::initIndexBuffer(indexData, d3D, resource);
     //PrintDebugMessages();
-    Heap::createDescriptorHeap(dhInfo::RTV_DH, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, d3D, resource);
+    Heap::createDescriptorHeap(dhInfo::DH_RTV, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, d3D, resource);
     //PrintDebugMessages();
     //Creating the back buffers.
-    D3D12_CPU_DESCRIPTOR_HANDLE handle = resource.descriptorHeaps[RTV_DH]->GetCPUDescriptorHandleForHeapStart();
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = resource.descriptorHeaps[dhInfo::DH_RTV]->GetCPUDescriptorHandleForHeapStart();
     UINT rtvDescriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-    UINT currentDescriptorHeapOffset = rtvDescriptorIncrementSize * resource.descriptorInHeapCount[RTV_DH];
+    UINT currentDescriptorHeapOffset = rtvDescriptorIncrementSize * resource.descriptorInHeapCount[dhInfo::DH_RTV];
     handle.ptr += currentDescriptorHeapOffset;
-    backBufferOffset = resource.descriptorInHeapCount[RTV_DH];
+    backBufferOffset = resource.descriptorInHeapCount[dhInfo::DH_RTV];
     Resource::createBackBuffers(windowWidth, windowHeight, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
     //PrintDebugMessages();
     //Creating the gBuffer. Turns out I am not using my default heap for anything right now... Will figure out later.
     renderTextureOffset = resource.texture2Ds.size();
     Resource::createGPUTexture(windowWidth, windowHeight, DXGI_FORMAT_R16G16B16A16_UNORM, textureTypeInfo::TEX_TYPE_RGBA, d3D, resource);
-    Heap::createDescriptorHeap(dhInfo::DSV_DH, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, d3D, resource);
+    Heap::createDescriptorHeap(dhInfo::DH_DSV, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, d3D, resource);
     Resource::createSimpleDepthStencil(windowWidth, windowHeight, d3D, resource);
-    Heap::createDescriptorHeap(dhInfo::SAMPLER_DH, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
+    Heap::createDescriptorHeap(dhInfo::DH_SAMPLER, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
+    Heap::createDescriptorHeap(dhInfo::DH_IMGUI_SRV, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
     Resource::createSimpleSampler(d3D, resource);
     Resource::init2DTexture(textureData, textureWidth, textureHeight, nrChannels, DXGI_FORMAT_R8G8B8A8_UNORM, fenceValue, d3D, resource);
-    constantBufferOffset = resource.descriptorInHeapCount[SRV_CBV_UAV_DH];
+    constantBufferOffset = resource.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
     Resource::initPerFrameConstantBuffer(perFrameConstantBufferData, d3D, resource);
     Resource::initPerModelConstantBuffer(perModelData, d3D, resource);
     //PrintDebugMessages();
@@ -328,9 +328,9 @@ void Engine::prepareData(){
     RootSignature::createBindlessRootSignature(d3D, resource);
     //Creating the first pipeline state.
     Shader renderShader("../shaders/simple.vsh","../shaders/simple.psh");
-    PipelineState::createGraphicsPSO(psoInfo::RENDER_PSO, renderShader, true, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
+    PipelineState::createGraphicsPSO(psoInfo::PSO_RENDER, renderShader, true, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
     Shader quadShader("../shaders/quad.vsh", "../shaders/quad.psh");
-    PipelineState::createGraphicsPSO(psoInfo::PRESENT_PSO, quadShader, false, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
+    PipelineState::createGraphicsPSO(psoInfo::PSO_PRESENT, quadShader, false, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
     PrintDebugMessages();
 }
 
@@ -338,14 +338,30 @@ void Engine::render(){
     bool running;
     running = true;
     SDL_Event sdlEvent;
-    float eachStep = 0.05;
-    float eachDir = 0.005;
+    float eachStep = 0.005;
+    float eachDir = 0.00025;
     if(!window){
         std::cerr<<"SDL Window Creation has failed!";
         return;
     }
     UINT frameIndex = 0;
-    d3D.commandLists[RENDER]->Close();
+    d3D.commandLists[cmdList::RENDER]->Close();
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ImGui::StyleColorsDark();
+    ImGui_ImplSDL3_InitForD3D(window);
+    ImGui_ImplDX12_Init(
+        d3D.device.Get(),
+        2,
+        DXGI_FORMAT_R8G8B8A8_UNORM,
+        resource.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV].Get(),
+        resource.descriptorHeaps[dhInfo::DH_IMGUI_SRV]->GetCPUDescriptorHandleForHeapStart(),
+        resource.descriptorHeaps[dhInfo::DH_IMGUI_SRV]->GetGPUDescriptorHandleForHeapStart()
+    );
+
     while(running){
         while (SDL_PollEvent(&sdlEvent))
             if(sdlEvent.type == SDL_EVENT_QUIT){
@@ -411,31 +427,31 @@ void Engine::render(){
             constantBufferPairs->size = 256;
             perFrameConstantBufferData.PSPArray.arr = constantBufferPairs;
             perFrameConstantBufferData.PSPArray.count = 1;
-            Resource::updateConstantBuffer(perFrameConstantBufferData, bufferInfo::PER_FRAME_CONSTANT_BUFFER, d3D, resource);
+            Resource::updateConstantBuffer(perFrameConstantBufferData, bufferInfo::BUFFER_PER_FRAME_CONSTANT, d3D, resource);
             }
         hr = d3D.commandAllocators[cmdAllocator::PRIMARY]->Reset();
         if(FAILED(hr)){
             std::cerr<<"Command allocator is reset during the start of each frame, and it couldn't reset!";
             return;
         }
-        hr = d3D.commandLists[cmdList::RENDER]->Reset(d3D.commandAllocators[cmdAllocator::PRIMARY].Get(), resource.pipelineStates[psoInfo::RENDER_PSO].Get());
+        hr = d3D.commandLists[cmdList::RENDER]->Reset(d3D.commandAllocators[cmdAllocator::PRIMARY].Get(), resource.pipelineStates[psoInfo::PSO_RENDER].Get());
         if(FAILED(hr)){
             std::cerr<<"Command list is reset during the start of each frame, and it couldn't reset!";
             return;
         }
-        d3D.commandLists[RENDER]->SetGraphicsRootSignature(resource.rootSignature.Get());
+        d3D.commandLists[cmdList::RENDER]->SetGraphicsRootSignature(resource.rootSignature.Get());
         // RTV heaps that we use for presenting to the screen, and not for rendering to a frame buffer or for re-use by the shader, do not need to be set with SetDescriptorHeaps, they are instead set by OMSetRenderTarget. If I wanted to reuse those render targets, then I should create a frame buffer and while creating the rtv in the RTVHeapDesc, I should have used the flag for ALLOW_RENDER_TARGET. Now I can re-use the same RTVs for both Framebuffer and for the swapchain, but then the swapchain format would need to be the same as the RTV format, and we will lose lots of information with only 1 byte for each color channel.
-        ID3D12DescriptorHeap* dHeaps[] = { resource.descriptorHeaps[dhInfo::SRV_CBV_UAV_DH].Get(), resource.descriptorHeaps[dhInfo::SAMPLER_DH].Get() }; //No RTV here because they're not shader visible.
-        d3D.commandLists[RENDER]->SetDescriptorHeaps(_countof(dHeaps), dHeaps);
-        d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(0, //Root parameter index, base register + index (b0, b1, and dependingly...) in the shader. If range says 5 descriptors, then it will basically start from that base register range and from the uniform heap pointer, and then allocate 5 consecutive descriptors.
-                                                                resource.descriptorHeaps[SRV_CBV_UAV_DH]->GetGPUDescriptorHandleForHeapStart());
+        ID3D12DescriptorHeap* dHeaps[] = { resource.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV].Get(), resource.descriptorHeaps[dhInfo::DH_SAMPLER].Get() }; //No RTV here because they're not shader visible.
+        d3D.commandLists[cmdList::RENDER]->SetDescriptorHeaps(_countof(dHeaps), dHeaps);
+        d3D.commandLists[cmdList::RENDER]->SetGraphicsRootDescriptorTable(0, //Root parameter index, base register + index (b0, b1, and dependingly...) in the shader. If range says 5 descriptors, then it will basically start from that base register range and from the uniform heap pointer, and then allocate 5 consecutive descriptors.
+                                                                resource.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetGPUDescriptorHandleForHeapStart());
         resource.descriptorHeaps[0]->GetGPUDescriptorHandleForHeapStart();
-        D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle = resource.descriptorHeaps[SRV_CBV_UAV_DH]->GetGPUDescriptorHandleForHeapStart();
+        D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle = resource.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetGPUDescriptorHandleForHeapStart();
         UINT descriptorSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         cbvHandle.ptr += descriptorSize * constantBufferOffset;
-        d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(1, cbvHandle);
-        //d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(1, gHandle);
-        d3D.commandLists[RENDER]->SetGraphicsRootDescriptorTable(2, resource.descriptorHeaps[SAMPLER_DH]->GetGPUDescriptorHandleForHeapStart());
+        d3D.commandLists[cmdList::RENDER]->SetGraphicsRootDescriptorTable(1, cbvHandle);
+        //d3D.commandLists[cmdList::RENDER]->SetGraphicsRootDescriptorTable(1, gHandle);
+        d3D.commandLists[cmdList::RENDER]->SetGraphicsRootDescriptorTable(2, resource.descriptorHeaps[dhInfo::DH_SAMPLER]->GetGPUDescriptorHandleForHeapStart());
         //Each 'slot' in the root parameter can hold anyting from one descriptor to descriptor tables. Each descriptor table can have multiple ranges. Where a range describes a contiguous block of descriptors of same type. Set a certain table. So this binds the 0'th table to the descriptorhandlestart.. So however it has defined it.
         D3D12_VIEWPORT viewPort = {}; //Viewport defines where we want to render to in the swapchain or the render target, whatever we are rendering to. So if I have a viewport of 500x500 in a 1000x1000 window, it will only render to the other 500x500
         viewPort.TopLeftX = 0.0f; //Position of X on the left
@@ -450,8 +466,8 @@ void Engine::render(){
         rect.top = 0;
         rect.right = windowWidth;
         rect.bottom = windowHeight;
-        d3D.commandLists[RENDER]->RSSetViewports(1, &viewPort);
-        d3D.commandLists[RENDER]->RSSetScissorRects(1, &rect);
+        d3D.commandLists[cmdList::RENDER]->RSSetViewports(1, &viewPort);
+        d3D.commandLists[cmdList::RENDER]->RSSetScissorRects(1, &rect);
         // Resource barrier is used when we want to use the same resource (say a texture) to write and read both, and in that case, the applicaiton will tell the GPU that this resource is in a write-ready state or read-ready state,and the GPU will wait for the transition if it's trying to read and the resource is in write-ready state. Now, since our pipeline cannot actually read the render texture, we are going to change state from 'present' meaning, to present to the swapchain, to render target, and vice-versa.
         D3D12_RESOURCE_BARRIER bbBarrierRender = {}; // Describes a resource barrier (transition in resource use).
         bbBarrierRender.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; //Transition of a set of subreosuces between different usages. The caller must specify the before and after usages of the subresources.
@@ -462,27 +478,27 @@ void Engine::render(){
         bbTransition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
         bbTransition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         bbBarrierRender.Transition = bbTransition;
-        d3D.commandLists[RENDER]->ResourceBarrier(1, &bbBarrierRender);//A resource barrier is a command you insert into a command list to inform the GPU driver that a resource (like a texture or buffer) is about to be used in a different way than before. This helps the GPU synchronize access to that resource and avoid hazards such as reading while writing or using stale data.
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = resource.descriptorHeaps[RTV_DH]->GetCPUDescriptorHandleForHeapStart();
+        d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &bbBarrierRender);//A resource barrier is a command you insert into a command list to inform the GPU driver that a resource (like a texture or buffer) is about to be used in a different way than before. This helps the GPU synchronize access to that resource and avoid hazards such as reading while writing or using stale data.
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = resource.descriptorHeaps[dhInfo::DH_RTV]->GetCPUDescriptorHandleForHeapStart();
         UINT rtvDescriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
         handle.ptr += (backBufferOffset + 2) * rtvDescriptorIncrementSize; //Can do it right now because I make the G buffer as soon as I make back buffers. Pointing to the G buffer instead of one of the two back buffers.
         const float clearColor[4] { 0.0f, 0.0f, 0.0f, 1.0f };
-        d3D.commandLists[RENDER]->ClearRenderTargetView(handle, clearColor,
+        d3D.commandLists[cmdList::RENDER]->ClearRenderTargetView(handle, clearColor,
                                                         0, //Number of RECTs to clear.
                                                         nullptr //Rects to clear, basically we can clear only a certain rect of the RTV if we want to.
                                                         );
 
         //Nullptr and false since no depth/stencil.
-        D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = resource.descriptorHeaps[DSV_DH]->GetCPUDescriptorHandleForHeapStart();
-        d3D.commandLists[RENDER]->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-        d3D.commandLists[RENDER]->OMSetRenderTargets(1, &handle, FALSE, &dsvHandle);
-        d3D.commandLists[RENDER]->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        //d3D.commandLists[RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[0]);
-        d3D.commandLists[RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[2]);
-        d3D.commandLists[RENDER]->IASetIndexBuffer(&resource.ibViews[0]);
-        d3D.commandLists[RENDER]->DrawIndexedInstanced(modelIndices[0], 1, 0, 0, 0);
+        D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = resource.descriptorHeaps[dhInfo::DH_DSV]->GetCPUDescriptorHandleForHeapStart();
+        d3D.commandLists[cmdList::RENDER]->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+        d3D.commandLists[cmdList::RENDER]->OMSetRenderTargets(1, &handle, FALSE, &dsvHandle);
+        d3D.commandLists[cmdList::RENDER]->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        //d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[0]);
+        d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[2]);
+        d3D.commandLists[cmdList::RENDER]->IASetIndexBuffer(&resource.ibViews[0]);
+        d3D.commandLists[cmdList::RENDER]->DrawIndexedInstanced(modelIndices[0], 1, 0, 0, 0);
         PrintDebugMessages();
-        //d3D.commandLists[RENDER]->DrawInstanced(3, 1, 0, 0);
+        //d3D.commandLists[cmdList::RENDER]->DrawInstanced(3, 1, 0, 0);
 
         //PrintDebugMessages();
         D3D12_RESOURCE_BARRIER bbBarrierRead = {};
@@ -492,15 +508,15 @@ void Engine::render(){
         bbTransition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
         bbBarrierRead.Transition = bbTransition;
 
-        d3D.commandLists[RENDER]->ResourceBarrier(1, &bbBarrierRead);
-        d3D.commandLists[RENDER]->SetPipelineState(resource.pipelineStates[psoInfo::PRESENT_PSO].Get());
-        handle = resource.descriptorHeaps[RTV_DH]->GetCPUDescriptorHandleForHeapStart();
+        d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &bbBarrierRead);
+        d3D.commandLists[cmdList::RENDER]->SetPipelineState(resource.pipelineStates[psoInfo::PSO_PRESENT].Get());
+        handle = resource.descriptorHeaps[dhInfo::DH_RTV]->GetCPUDescriptorHandleForHeapStart();
         handle.ptr += (backBufferOffset + frameIndex) * rtvDescriptorIncrementSize; //Pointing to one of the back buffers instead of the G buffer to render to.
         bbTransition.pResource = resource.texture2Ds[renderTextureOffset - 2 + frameIndex].Get();
         bbTransition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
         bbTransition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         bbBarrierRender.Transition = bbTransition;
-        d3D.commandLists[RENDER]->ResourceBarrier(1, &bbBarrierRender);
+        d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &bbBarrierRender);
 
         D3D12_RESOURCE_BARRIER bbBarrierPresent = {};
         bbBarrierPresent.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
@@ -509,20 +525,20 @@ void Engine::render(){
         bbTransition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
         bbBarrierPresent.Transition = bbTransition;
         //PrintDebugMessages();
-        d3D.commandLists[RENDER]->OMSetRenderTargets(1, &handle, FALSE, nullptr);
-        d3D.commandLists[RENDER]->ClearRenderTargetView(handle, clearColor, 0, nullptr);
-        d3D.commandLists[RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[1]);
-        d3D.commandLists[RENDER]->IASetIndexBuffer(&resource.ibViews[1]);
-        d3D.commandLists[RENDER]->DrawIndexedInstanced(6, 1, 0, 0, 0);
-        d3D.commandLists[RENDER]->ResourceBarrier(1, &bbBarrierPresent);
-        hr = d3D.commandLists[RENDER]->Close();
+        d3D.commandLists[cmdList::RENDER]->OMSetRenderTargets(1, &handle, FALSE, nullptr);
+        d3D.commandLists[cmdList::RENDER]->ClearRenderTargetView(handle, clearColor, 0, nullptr);
+        d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[1]);
+        d3D.commandLists[cmdList::RENDER]->IASetIndexBuffer(&resource.ibViews[1]);
+        d3D.commandLists[cmdList::RENDER]->DrawIndexedInstanced(6, 1, 0, 0, 0);
+        d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &bbBarrierPresent);
+        hr = d3D.commandLists[cmdList::RENDER]->Close();
         if(FAILED(hr)){
             std::cerr<<"Command list close during render-loop failed!";
             std::cout<<hr;
             return;
         }
         //PrintDebugMessages();
-        ID3D12CommandList* cLists[] = { d3D.commandLists[RENDER].Get() };
+        ID3D12CommandList* cLists[] = { d3D.commandLists[cmdList::RENDER].Get() };
         d3D.commandQueue->ExecuteCommandLists(_countof(cLists), cLists);
         //PrintDebugMessages();
         hr = d3D.xSwapChain->Present(0, DXGI_PRESENT_ALLOW_TEARING);

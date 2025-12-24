@@ -36,12 +36,10 @@ PSInput VSMain(float4 position : POSITION, float4 color : COLOR, float4 normal :
     float4x4 modelMatrix = float4x4(cmBuffers[index + 1].modelMatR0, cmBuffers[index + 1].modelMatR1, cmBuffers[index + 1].modelMatR2, cmBuffers[index + 1].modelMatR3);
     float4x4 viewMatrix = float4x4(cfBuffers[0].viewMatR0, cfBuffers[0].viewMatR1, cfBuffers[0].viewMatR2, cfBuffers[0].viewMatR3);
     float4x4 projMatrix = float4x4(cfBuffers[0].projMatR0, cfBuffers[0].projMatR1, cfBuffers[0].projMatR2, cfBuffers[0].projMatR3);
-
-	float4 worldPos = mul(position, modelMatrix);
-	float4 viewPos = mul(worldPos, viewMatrix);
-	float4 clipPos = mul(viewPos, projMatrix);
-
-	result.position = clipPos;
+    float4 worldPos = mul(position, modelMatrix);
+    float4 viewPos = mul(worldPos, viewMatrix);
+    float4 clipPos = mul(viewPos, projMatrix);
+    result.position = clipPos;
 
     result.texcoord = position.xy * 0.5f + 0.5f;
     result.normal = normal;

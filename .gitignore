@@ -9,3 +9,6 @@ lib/
 resources/
 source/oldmain.cpp
 CMakeLists.txt
+include/D3D12/
+include/glm/
+include/SDL3/
