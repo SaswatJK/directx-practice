@@ -13,7 +13,7 @@ private:
     glm::mat4 matTestProj;
 public:
     Camera(glm::vec3 initPos, glm::vec3 initDir, glm::vec3 initUp);
-    void updateCamera(glm::vec3 changePos, glm::vec3 changeDir, glm::vec3 changeUp);
+    void updateCamera(glm::vec3 changePos, glm::vec3 changeDir);
     glm::mat4 getMatView() { return matView; }
     glm::mat4 getMatProj() { return matProj; }
     glm::mat4 getMatTestView() { return matTestView; }

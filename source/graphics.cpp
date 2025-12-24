@@ -352,6 +352,9 @@ void Engine::render(){
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
+    io.FontGlobalScale = 1.0f;
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.ScaleAllSizes(1.5f); // scales all paddings, borders, etc.
     ImGui_ImplSDL3_InitForD3D(window);
     ImGui_ImplDX12_Init(
         d3D.device.Get(),
@@ -361,6 +364,9 @@ void Engine::render(){
         resource.descriptorHeaps[dhInfo::DH_IMGUI_SRV]->GetCPUDescriptorHandleForHeapStart(),
         resource.descriptorHeaps[dhInfo::DH_IMGUI_SRV]->GetGPUDescriptorHandleForHeapStart()
     );
+    unsigned char* pixels;
+    int width, height;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 
     while(running){
         while (SDL_PollEvent(&sdlEvent))
@@ -370,6 +376,35 @@ void Engine::render(){
             }
         // areDownMov   || areDownDir
         // 0bWASDCtSp00 || 0bLRUpDn0000
+        ImGui_ImplDX12_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        //ImGui::Begin("Debug Info");
+        //ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+        ImGui::SetNextWindowSize(ImVec2(200, 200));
+        ImGui::Begin("My First Tool", NULL, ImGuiWindowFlags_MenuBar);
+        if (ImGui::BeginMenuBar())
+        {
+            if (ImGui::BeginMenu("File"))
+            {
+                if (ImGui::MenuItem("Open..", "Ctrl+O")) { /* Do stuff */ }
+                if (ImGui::MenuItem("Save", "Ctrl+S"))   { /* Do stuff */ }
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenuBar();
+        }
+        float samples[100];
+        for (int n = 0; n < 100; n++)
+            samples[n] = sinf(n * 0.2f + ImGui::GetTime() * 1.5f);
+        ImGui::PlotLines("Samples", samples, 100);
+
+        ImGui::TextColored(ImVec4(1,1,0,1), "Important Stuff");
+        ImGui::BeginChild("Scrolling");
+        for (int n = 0; n < 50; n++)
+            ImGui::Text("%04d: Some text", n);
+        ImGui::EndChild();
+        ImGui::End();
+
         SHORT stateW = GetAsyncKeyState('W');
         SHORT stateA = GetAsyncKeyState('A');
         SHORT stateS = GetAsyncKeyState('S');
@@ -419,7 +454,7 @@ void Engine::render(){
                                 (areDownDirection & 0b00100000) ? eachDir : -eachDir
                                 : 0;
 
-            camera->updateCamera(glm::vec3(xMovChange, yMovChange, zMovChange), glm::vec3(xDirChange, yDirChange, 0) , glm::vec3 (0, 0, 0));
+            camera->updateCamera(glm::vec3(xMovChange, yMovChange, zMovChange), glm::vec3(xDirChange, yDirChange, 0));
             *viewMat = camera->getMatView();
             glm::mat4* projMat = viewMat + 1;
             *projMat = camera->getMatProj();
@@ -530,6 +565,11 @@ void Engine::render(){
         d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[1]);
         d3D.commandLists[cmdList::RENDER]->IASetIndexBuffer(&resource.ibViews[1]);
         d3D.commandLists[cmdList::RENDER]->DrawIndexedInstanced(6, 1, 0, 0, 0);
+
+        ImGui::Render();
+        ID3D12DescriptorHeap* imgui_heaps[] = { resource.descriptorHeaps[dhInfo::DH_IMGUI_SRV].Get() };
+        d3D.commandLists[cmdList::RENDER]->SetDescriptorHeaps(1, imgui_heaps);
+        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), d3D.commandLists[cmdList::RENDER].Get());
         d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &bbBarrierPresent);
         hr = d3D.commandLists[cmdList::RENDER]->Close();
         if(FAILED(hr)){
