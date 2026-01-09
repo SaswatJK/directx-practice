@@ -41,6 +41,8 @@ namespace Resource{
     //I am so confused, I wasted so many hours thinking of a data agnostinc way of uplaoding to buffers but I know what I will upload in the vertex and constant buffer tho... I guess it'll be useful for constant and intermmediate bufferse?
     void initVertexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources); //width should be the sum of the data.
     void initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);
+    void initBLAS(const DataArray &vertexData, const DataArray &indexData, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources);
+    void initTLAS(const DataArray &vertexData, const DataArray &indexData, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources);
     void initPerFrameConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);
     void updateConstantBuffer(const DataArray &data, bufferInfo buffer, const D3DGlobal &d3D, D3DResources &resources);
     void initPerModelConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);

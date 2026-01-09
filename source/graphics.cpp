@@ -173,17 +173,6 @@ void Engine::prepareData(){
     glm::vec3 cameraUp = {0.0f, 1.0f, 0.0f};
     camera = new Camera(cameraPos, cameraDir, cameraUp); //Using new instead of malloc cause it's a class with it's constructors and what not.
 
-    Vertex triangleVertices[3] = {
-        {{0.0f, 0.5f, -0.5f, 1.0f},
-         {1.0f, 1.0f, 1.0f, 1.0f},
-         {1.0f, 1.0f, 1.0f, 1.0f}},
-        {{0.5f, -0.5f, 0.5f, 1.0f},
-         {1.0f, 1.0f, 1.0f, 1.0f},
-         {1.0f, 1.0f, 1.0f, 1.0f}},
-        {{-0.5, -0.5f, 0.0f, 1.0f},
-         {1.0f, 1.0f, 1.0f, 1.0f},
-         {1.0f, 1.0f, 1.0f, 1.0f}}};
-
     Vertex quadVertices[4] = {
         {{-1.0f, -1.0f, 0.0f, 1.0f}, //bottom left
          {1.0f, 1.0f, 1.0f, 1.0f},
@@ -224,7 +213,7 @@ void Engine::prepareData(){
     unsigned char* textureData = stbi_load(texturePath.c_str(), &textureWidth, &textureHeight, &nrChannels, 0);
     if (textureData == nullptr)
         std::cout<<"Texture data can't be opened in memory!";
-    VertexSizePair triAndQuad[3]; //Makes them congiguous.
+    VertexSizePair triAndQuad[2]; //Makes them congiguous.
     projMatR = projMatR + 1;
     glm::vec4* viewPos = (glm::vec4*)projMatR;
     *viewPos = camera->getVFront();
@@ -247,18 +236,16 @@ void Engine::prepareData(){
     perModelData.PSPArray.arr = perModelPSP;
     perModelData.PSPArray.count = numOfModels;
     std::cout<<"Num of models is: "<<numOfModels;
-    triAndQuad[0].data = triangleVertices;
-    triAndQuad[0].size = sizeof(triangleVertices);
-    triAndQuad[1].data = quadVertices;
-    triAndQuad[1].size = sizeof(quadVertices);
+    triAndQuad[0].data = quadVertices;
+    triAndQuad[0].size = sizeof(quadVertices);
     std::vector<Vertex> allModelVertices;
     for(uint32_t i = 0; i < numOfModels; i++){
-        allModelVertices.insert(allModelVertices.end(), 
+        allModelVertices.insert(allModelVertices.end(),
             firstModels.models[i].vertices.begin(),
             firstModels.models[i].vertices.end());
     }
-    triAndQuad[2].data = allModelVertices.data();
-    triAndQuad[2].size = allModelVertices.size() * sizeof(Vertex);
+    triAndQuad[1].data = allModelVertices.data();
+    triAndQuad[1].size = allModelVertices.size() * sizeof(Vertex);
     DataArray vertexData = {};
     vertexData.VSPArray.arr = triAndQuad;
     vertexData.VSPArray.count = 3;
@@ -529,7 +516,7 @@ void Engine::render(){
         d3D.commandLists[cmdList::RENDER]->OMSetRenderTargets(1, &handle, FALSE, &dsvHandle);
         d3D.commandLists[cmdList::RENDER]->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         //d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[0]);
-        d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[2]);
+        d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[1]);
         d3D.commandLists[cmdList::RENDER]->IASetIndexBuffer(&resource.ibViews[0]);
         d3D.commandLists[cmdList::RENDER]->DrawIndexedInstanced(modelIndices[0], 1, 0, 0, 0);
         PrintDebugMessages();
@@ -562,7 +549,7 @@ void Engine::render(){
         //PrintDebugMessages();
         d3D.commandLists[cmdList::RENDER]->OMSetRenderTargets(1, &handle, FALSE, nullptr);
         d3D.commandLists[cmdList::RENDER]->ClearRenderTargetView(handle, clearColor, 0, nullptr);
-        d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[1]);
+        d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[0]);
         d3D.commandLists[cmdList::RENDER]->IASetIndexBuffer(&resource.ibViews[1]);
         d3D.commandLists[cmdList::RENDER]->DrawIndexedInstanced(6, 1, 0, 0, 0);
 

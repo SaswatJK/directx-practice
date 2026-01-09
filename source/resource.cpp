@@ -3,8 +3,10 @@
 #include "D3D12/dxgicommon.h"
 #include "D3D12/dxgiformat.h"
 #include "utils.h"
+#include <basetsd.h>
 #include <climits>
 #include <combaseapi.h>
+#include <cstddef>
 #include <intsafe.h>
 #include <minwindef.h>
 #include <wrl/client.h>
@@ -176,6 +178,121 @@ void Resource::initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DR
         previousOffset += data.PSPArray.arr[i].size;
         resources.ibViews[i] = ibView;
     }
+}
+
+void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources){
+    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoDescs;
+    // I would want each BLAS to be confined to each loaded model, as each has it's own model transform.
+    // Object in this case refers to anything that uses the same texture and has the same or similar attributes: Roughness, Specularity etc.
+    D3D12_RAYTRACING_GEOMETRY_DESC tempDesc;
+    D3D12_GPU_VIRTUAL_ADDRESS vertexStartAddress = resources.buffers[BUFFER_VERTEX]->GetGPUVirtualAddress();
+    D3D12_GPU_VIRTUAL_ADDRESS indexStartAddress = resources.buffers[BUFFER_INDEX]->GetGPUVirtualAddress();
+    UINT64 vertexStartOffset = 0;
+    UINT64 indexStartOffset = 0;
+    for(size_t i = 0; i < vertexData.VSPArray.count; i++){
+        size_t currentModelSize = vertexData.VSPArray.arr[i].size;
+        size_t vertexCount = currentModelSize / sizeof(Vertex);
+        size_t currentModelIndexSize = indexData.PSPArray.arr[i].size;
+        size_t indexCount = currentModelIndexSize / sizeof(uint32_t);
+        tempDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+        tempDesc.Flags = geometryFlags;
+        tempDesc.Triangles.VertexBuffer.StartAddress = resources.buffers[BUFFER_VERTEX]->GetGPUVirtualAddress() + vertexStartOffset;
+        tempDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
+        tempDesc.Triangles.IndexBuffer = resources.buffers[BUFFER_INDEX]->GetGPUVirtualAddress() + indexStartOffset;
+        tempDesc.Triangles.VertexCount = vertexCount;
+        tempDesc.Triangles.IndexCount = indexCount;
+        tempDesc.Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
+        tempDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        tempDesc.Triangles.Transform3x4 = NULL; // Okay so basically, we need to, for each of these guys, give a model matrix, so each "object" gets transformed.
+        vertexStartOffset += currentModelSize;
+        indexStartOffset += currentModelIndexSize;
+        geoDescs.push_back(tempDesc);
+    }
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blasInputs = {};
+    blasInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+    blasInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD; // Check and see the performance if I change it to PREFER_FAST_TRACE instead.
+    blasInputs.NumDescs = geoDescs.size();
+    blasInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    blasInputs.pGeometryDescs = geoDescs.data();
+
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blasPrebuildInfo = {};
+    d3D.device->GetRaytracingAccelerationStructurePrebuildInfo(&blasInputs, &blasPrebuildInfo);
+
+    D3D12_RESOURCE_DESC blasBufferDesc = {};
+    DXGI_SAMPLE_DESC sampleDesc = {};
+    sampleDesc.Count = 1;
+    sampleDesc.Quality = 0;
+    blasBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    blasBufferDesc.Alignment = 0;
+    blasBufferDesc.Height = 1;
+    blasBufferDesc.DepthOrArraySize = 1;
+    blasBufferDesc.MipLevels = 1;
+    blasBufferDesc.Format = DXGI_FORMAT_UNKNOWN;
+    blasBufferDesc.SampleDesc = sampleDesc;
+    blasBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    blasBufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    blasBufferDesc.Width = blasPrebuildInfo.ResultDataMaxSizeInBytes;
+    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &blasBufferDesc, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, nullptr, IID_PPV_ARGS(&resources.buffers[BUFFER_BLAS]));
+
+    D3D12_RESOURCE_DESC blasScratchBufferDesc = blasBufferDesc;
+    blasScratchBufferDesc.Width = blasPrebuildInfo.ScratchDataSizeInBytes;
+    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &blasScratchBufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&resources.buffers[BUFFER_BLAS_SCRATCH]));
+}
+
+void Resource::initTLAS(const DataArray &vertexData, const DataArray &indexData, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources){
+    // One TLAS with multiple instances is the way to go. And multiple inscanes can each point to the same BLAS, or be referring to the same BLAS multiple times with their own transforms.
+    D3D12_RAYTRACING_INSTANCE_DESC instanceDesc = {};
+    instanceDesc.InstanceID = 0; // Can use in shader to identify which instance was hit.
+    instanceDesc.InstanceContributionToHitGroupIndex = 0; // Offset into shader table.
+    instanceDesc.InstanceMask = 0xFF; // Ray mask - 0xFF means "hit all rays".
+    instanceDesc.AccelerationStructure = resources.buffers[BUFFER_BLAS]->GetGPUVirtualAddress(); // BLAS.
+    // Why trnasform in TLAS and not BLAS? The only reason is for non-static scene. We want a non-static scene where the BLAS themselves move? Use this matrix instead of rebuilding BLAS.
+    instanceDesc.Transform[0][0] = 1.0f;
+    instanceDesc.Transform[1][1] = 1.0f;
+    instanceDesc.Transform[2][2] = 1.0f;
+    instanceDesc.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+
+    // We can make multiple instances. Now, say we have a tree BLAS, we want it to be transformed to different places, just create multiple instances and also have them have different transforms.
+    UINT64 instanceDescSize = sizeof(D3D12_RAYTRACING_INSTANCE_DESC);
+    D3D12_RESOURCE_DESC tlasBufferDescDesc = {};
+    DXGI_SAMPLE_DESC sampleDesc = {};
+    sampleDesc.Count = 1;
+    sampleDesc.Quality = 0;
+    tlasBufferDescDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    tlasBufferDescDesc.Alignment = 0;
+    tlasBufferDescDesc.Height = 1;
+    tlasBufferDescDesc.DepthOrArraySize = 1;
+    tlasBufferDescDesc.MipLevels = 1;
+    tlasBufferDescDesc.Format = DXGI_FORMAT_UNKNOWN;
+    tlasBufferDescDesc.SampleDesc = sampleDesc;
+    tlasBufferDescDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    tlasBufferDescDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    tlasBufferDescDesc.Width = instanceDescSize;
+    d3D.device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE, &tlasBufferDescDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&resources.buffers[BUFFER_TLAS_DESC]));
+
+    void* mappedData;
+    resources.buffers[BUFFER_TLAS_SCRATCH]->Map(0, nullptr, &mappedData);
+    memcpy(mappedData, &instanceDesc, instanceDescSize);
+    resources.buffers[BUFFER_TLAS_SCRATCH]->Unmap(0, nullptr);
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlasInputs = {};
+    tlasInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+    tlasInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD; // Will chang elater.
+    tlasInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    tlasInputs.NumDescs = 1;
+    tlasInputs.InstanceDescs = resources.buffers[BUFFER_TLAS_SCRATCH]->GetGPUVirtualAddress();
+
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlasPrebuildInfo = {};
+    d3D.device->GetRaytracingAccelerationStructurePrebuildInfo(&tlasInputs, &tlasPrebuildInfo);
+    D3D12_RESOURCE_DESC tlasBufferDesc = tlasBufferDescDesc;
+    tlasBufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    tlasBufferDesc.Width = tlasPrebuildInfo.ResultDataMaxSizeInBytes;
+    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &tlasBufferDesc, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, nullptr, IID_PPV_ARGS(&resources.buffers[BUFFER_TLAS]));
+
+    D3D12_RESOURCE_DESC tlasScratchBufferDesc = tlasBufferDesc;
+    tlasScratchBufferDesc.Width = tlasPrebuildInfo.ScratchDataSizeInBytes;
+    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &tlasScratchBufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&resources.buffers[BUFFER_TLAS]));
 }
 
 void Resource::initPerFrameConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources){
