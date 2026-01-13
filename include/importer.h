@@ -10,7 +10,7 @@ class Model{
 public:
     std::vector<Vertex> vertices;
     std::vector<Face> faces;
-    std::vector<unsigned int> vertexInfo;
+    std::vector<unsigned int> vertexInfo; // Flag for each vertex, if it's duplicated or not.
     glm::mat4 modelMatrix;
     //We will check that the number of Meshes isn't going to be more than the maximum number of Triangles that can be made with 'N' Vertices:
     //I calculated this using basic deduction through a complete graph: Maximum number of triangles in a complete graph is:

@@ -5,6 +5,7 @@
 #include <wrl/client.h>
 #include <cstdint>
 #include <vector>
+#include <importer.h>
 
 typedef struct{
     void* data; //Pointer to a resource.
@@ -42,7 +43,9 @@ namespace Resource{
     void initVertexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources); //width should be the sum of the data.
     void initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);
     void initBLAS(const DataArray &vertexData, const DataArray &indexData, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources);
+    void buildBLAS(const D3DGlobal &d3D, D3DResources &resources);
     void initTLAS(const DataArray &vertexData, const DataArray &indexData, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources);
+    void buildTLAS(const D3DGlobal &d3D, D3DResources &resources);
     void initPerFrameConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);
     void updateConstantBuffer(const DataArray &data, bufferInfo buffer, const D3DGlobal &d3D, D3DResources &resources);
     void initPerModelConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);

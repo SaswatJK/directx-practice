@@ -56,7 +56,6 @@ typedef enum {
     BUFFER_INDEX,
     BUFFER_PER_FRAME_CONSTANT,
     BUFFER_PER_MODEL_CONSTANT,
-    BUFFER_BLAS,
     BUFFER_BLAS_SCRATCH,
     BUFFER_TLAS_DESC,
     BUFFER_TLAS,
@@ -112,6 +111,9 @@ typedef struct D3DResourceStruct{
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineStates[psoInfo::PSO_COUNT];
     std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> texture2Ds; //All the textures that will be used at once.
     Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature; // I think I can get away with only one root signature because of bindless.
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> BLAS; // All the BLASes.
+    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoDescs; // All the geometry (in this case each model is a geometry)'s descs.
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlasInputs; // Right now I only have one TLAS.
     std::vector<D3D12_VERTEX_BUFFER_VIEW> vbViews;
     std::vector<D3D12_INDEX_BUFFER_VIEW> ibViews;
     UINT32 heapOffsets[heapInfo::HEAP_COUNT] = {0};

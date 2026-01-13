@@ -180,45 +180,15 @@ void Resource::initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DR
     }
 }
 
-void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources){
-    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoDescs;
+void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData, const Models &models, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources){
+    D3D12_RAYTRACING_GEOMETRY_DESC geoDesc; // I need to save theses descs.
     // I would want each BLAS to be confined to each loaded model, as each has it's own model transform.
     // Object in this case refers to anything that uses the same texture and has the same or similar attributes: Roughness, Specularity etc.
-    D3D12_RAYTRACING_GEOMETRY_DESC tempDesc;
     D3D12_GPU_VIRTUAL_ADDRESS vertexStartAddress = resources.buffers[BUFFER_VERTEX]->GetGPUVirtualAddress();
     D3D12_GPU_VIRTUAL_ADDRESS indexStartAddress = resources.buffers[BUFFER_INDEX]->GetGPUVirtualAddress();
+    UINT64 maxScratchBufferSize = 0;
     UINT64 vertexStartOffset = 0;
     UINT64 indexStartOffset = 0;
-    for(size_t i = 0; i < vertexData.VSPArray.count; i++){
-        size_t currentModelSize = vertexData.VSPArray.arr[i].size;
-        size_t vertexCount = currentModelSize / sizeof(Vertex);
-        size_t currentModelIndexSize = indexData.PSPArray.arr[i].size;
-        size_t indexCount = currentModelIndexSize / sizeof(uint32_t);
-        tempDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-        tempDesc.Flags = geometryFlags;
-        tempDesc.Triangles.VertexBuffer.StartAddress = resources.buffers[BUFFER_VERTEX]->GetGPUVirtualAddress() + vertexStartOffset;
-        tempDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
-        tempDesc.Triangles.IndexBuffer = resources.buffers[BUFFER_INDEX]->GetGPUVirtualAddress() + indexStartOffset;
-        tempDesc.Triangles.VertexCount = vertexCount;
-        tempDesc.Triangles.IndexCount = indexCount;
-        tempDesc.Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
-        tempDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
-        tempDesc.Triangles.Transform3x4 = NULL; // Okay so basically, we need to, for each of these guys, give a model matrix, so each "object" gets transformed.
-        vertexStartOffset += currentModelSize;
-        indexStartOffset += currentModelIndexSize;
-        geoDescs.push_back(tempDesc);
-    }
-
-    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blasInputs = {};
-    blasInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
-    blasInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD; // Check and see the performance if I change it to PREFER_FAST_TRACE instead.
-    blasInputs.NumDescs = geoDescs.size();
-    blasInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-    blasInputs.pGeometryDescs = geoDescs.data();
-
-    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blasPrebuildInfo = {};
-    d3D.device->GetRaytracingAccelerationStructurePrebuildInfo(&blasInputs, &blasPrebuildInfo);
-
     D3D12_RESOURCE_DESC blasBufferDesc = {};
     DXGI_SAMPLE_DESC sampleDesc = {};
     sampleDesc.Count = 1;
@@ -232,29 +202,92 @@ void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData,
     blasBufferDesc.SampleDesc = sampleDesc;
     blasBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     blasBufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-    blasBufferDesc.Width = blasPrebuildInfo.ResultDataMaxSizeInBytes;
-    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &blasBufferDesc, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, nullptr, IID_PPV_ARGS(&resources.buffers[BUFFER_BLAS]));
 
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blasPrebuildInfo = {};
+    for(size_t i = 0; i < models.models.size(); i++){ // We don't want the quad to be used here?
+        Microsoft::WRL::ComPtr<ID3D12Resource> tempResource;
+        size_t vertexCount = models.models[i].vertices.size();
+        size_t currentModelSize = sizeof(Vertex) * vertexCount;
+        size_t indexCount = models.models[i].faces.size() * 3;
+        size_t currentModelIndexSize = indexCount * sizeof(uint32_t);
+        geoDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+        geoDesc.Flags = geometryFlags;
+        geoDesc.Triangles.VertexBuffer.StartAddress = resources.buffers[bufferInfo::BUFFER_VERTEX]->GetGPUVirtualAddress() + vertexStartOffset;
+        geoDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
+        geoDesc.Triangles.IndexBuffer = resources.buffers[bufferInfo::BUFFER_INDEX]->GetGPUVirtualAddress() + indexStartOffset;
+        geoDesc.Triangles.VertexCount = vertexCount;
+        geoDesc.Triangles.IndexCount = indexCount;
+        geoDesc.Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
+        geoDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        glm::mat4 transposed = glm::transpose(models.models[i].modelMatrix);
+        memcpy(&geoDesc.Triangles.Transform3x4, &transposed[0], sizeof(float) * 12);
+        // Okay so basically, we need to, for each of these guys, give a model matrix, so each "object" gets transformed.
+        // Now since I don't want to change the position currently, I will give the transform right now.
+        vertexStartOffset += currentModelSize;
+        indexStartOffset += currentModelIndexSize;
+
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blasInputs = {};
+        blasInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+        blasInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD; // Check and see the performance if I change it to PREFER_FAST_TRACE instead.
+        blasInputs.NumDescs = 1;
+        blasInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+        blasInputs.pGeometryDescs = &geoDesc;
+        resources.geoDescs.push_back(geoDesc);
+        d3D.device->GetRaytracingAccelerationStructurePrebuildInfo(&blasInputs, &blasPrebuildInfo);
+        if(maxScratchBufferSize < blasPrebuildInfo.ScratchDataSizeInBytes)
+            maxScratchBufferSize = blasPrebuildInfo.ScratchDataSizeInBytes;
+        blasBufferDesc.Width = blasPrebuildInfo.ResultDataMaxSizeInBytes;
+        size_t currentBLASindex = resources.BLAS.size();
+        resources.BLAS.push_back(tempResource);
+        d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &blasBufferDesc, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, nullptr, IID_PPV_ARGS(&resources.BLAS[currentBLASindex]));
+    }
     D3D12_RESOURCE_DESC blasScratchBufferDesc = blasBufferDesc;
-    blasScratchBufferDesc.Width = blasPrebuildInfo.ScratchDataSizeInBytes;
-    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &blasScratchBufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&resources.buffers[BUFFER_BLAS_SCRATCH]));
+    blasScratchBufferDesc.Width = maxScratchBufferSize;
+    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &blasScratchBufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_BLAS_SCRATCH]));
+}
+
+void Resource::buildBLAS(const D3DGlobal &d3D, D3DResources &resources){
+    D3D12_GPU_VIRTUAL_ADDRESS scratchAddress = resources.buffers[bufferInfo::BUFFER_BLAS_SCRATCH]->GetGPUVirtualAddress();
+    for (size_t i = 0; i < resources.BLAS.size(); i++) {
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blasInputs = {};
+        blasInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+        blasInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+        blasInputs.NumDescs = 1;
+        blasInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+        blasInputs.pGeometryDescs = &resources.geoDescs[i];
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC buildDesc = {};
+        buildDesc.Inputs = blasInputs;
+        buildDesc.DestAccelerationStructureData = resources.BLAS[i]->GetGPUVirtualAddress();
+        buildDesc.ScratchAccelerationStructureData = scratchAddress;
+        d3D.commandLists[cmdList::RENDER]->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
+        D3D12_RESOURCE_BARRIER barrierBLAS = {};
+        barrierBLAS.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+        barrierBLAS.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+        D3D12_RESOURCE_UAV_BARRIER barrierUAV = {};
+        barrierUAV.pResource = resources.BLAS[i].Get();
+        barrierBLAS.UAV = barrierUAV;
+        d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &barrierBLAS);
+    }
 }
 
 void Resource::initTLAS(const DataArray &vertexData, const DataArray &indexData, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources){
     // One TLAS with multiple instances is the way to go. And multiple inscanes can each point to the same BLAS, or be referring to the same BLAS multiple times with their own transforms.
-    D3D12_RAYTRACING_INSTANCE_DESC instanceDesc = {};
-    instanceDesc.InstanceID = 0; // Can use in shader to identify which instance was hit.
-    instanceDesc.InstanceContributionToHitGroupIndex = 0; // Offset into shader table.
-    instanceDesc.InstanceMask = 0xFF; // Ray mask - 0xFF means "hit all rays".
-    instanceDesc.AccelerationStructure = resources.buffers[BUFFER_BLAS]->GetGPUVirtualAddress(); // BLAS.
-    // Why trnasform in TLAS and not BLAS? The only reason is for non-static scene. We want a non-static scene where the BLAS themselves move? Use this matrix instead of rebuilding BLAS.
-    instanceDesc.Transform[0][0] = 1.0f;
-    instanceDesc.Transform[1][1] = 1.0f;
-    instanceDesc.Transform[2][2] = 1.0f;
-    instanceDesc.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
-
+    std::vector<D3D12_RAYTRACING_INSTANCE_DESC> instanceDescs;
+    for(size_t i = 0; i < resources.BLAS.size(); i++){
+        D3D12_RAYTRACING_INSTANCE_DESC instanceDesc = {};
+        instanceDesc.InstanceID = i; // Can use in shader to identify which instance was hit.
+        instanceDesc.InstanceContributionToHitGroupIndex = 0; // Offset into shader table.
+        instanceDesc.InstanceMask = 0xFF; // Ray mask - 0xFF means "hit all rays".
+        instanceDesc.AccelerationStructure = resources.BLAS[i]->GetGPUVirtualAddress(); // BLAS.
+        // Why trnasform in TLAS and not BLAS? The only reason is for non-static scene. We want a non-static scene where the BLAS themselves move? Use this matrix instead of rebuilding BLAS.
+        instanceDesc.Transform[0][0] = 1.0f;
+        instanceDesc.Transform[1][1] = 1.0f;
+        instanceDesc.Transform[2][2] = 1.0f;
+        instanceDesc.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+        instanceDescs.push_back(instanceDesc);
+    }
     // We can make multiple instances. Now, say we have a tree BLAS, we want it to be transformed to different places, just create multiple instances and also have them have different transforms.
-    UINT64 instanceDescSize = sizeof(D3D12_RAYTRACING_INSTANCE_DESC);
+    UINT64 instanceDescSize = sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * instanceDescs.size();
     D3D12_RESOURCE_DESC tlasBufferDescDesc = {};
     DXGI_SAMPLE_DESC sampleDesc = {};
     sampleDesc.Count = 1;
@@ -269,30 +302,47 @@ void Resource::initTLAS(const DataArray &vertexData, const DataArray &indexData,
     tlasBufferDescDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     tlasBufferDescDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
     tlasBufferDescDesc.Width = instanceDescSize;
-    d3D.device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE, &tlasBufferDescDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&resources.buffers[BUFFER_TLAS_DESC]));
+    d3D.device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE, &tlasBufferDescDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_TLAS_DESC]));
 
     void* mappedData;
-    resources.buffers[BUFFER_TLAS_SCRATCH]->Map(0, nullptr, &mappedData);
-    memcpy(mappedData, &instanceDesc, instanceDescSize);
-    resources.buffers[BUFFER_TLAS_SCRATCH]->Unmap(0, nullptr);
+    resources.buffers[bufferInfo::BUFFER_TLAS_DESC]->Map(0, nullptr, &mappedData);
+    memcpy(mappedData, instanceDescs.data(), instanceDescSize);
+    resources.buffers[bufferInfo::BUFFER_TLAS_DESC]->Unmap(0, nullptr);
 
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlasInputs = {};
     tlasInputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
     tlasInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD; // Will chang elater.
     tlasInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-    tlasInputs.NumDescs = 1;
-    tlasInputs.InstanceDescs = resources.buffers[BUFFER_TLAS_SCRATCH]->GetGPUVirtualAddress();
+    tlasInputs.NumDescs = instanceDescs.size();
+    tlasInputs.InstanceDescs = resources.buffers[bufferInfo::BUFFER_TLAS_DESC]->GetGPUVirtualAddress();
 
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlasPrebuildInfo = {};
     d3D.device->GetRaytracingAccelerationStructurePrebuildInfo(&tlasInputs, &tlasPrebuildInfo);
     D3D12_RESOURCE_DESC tlasBufferDesc = tlasBufferDescDesc;
     tlasBufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     tlasBufferDesc.Width = tlasPrebuildInfo.ResultDataMaxSizeInBytes;
-    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &tlasBufferDesc, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, nullptr, IID_PPV_ARGS(&resources.buffers[BUFFER_TLAS]));
+    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &tlasBufferDesc, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, nullptr, IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_TLAS]));
 
     D3D12_RESOURCE_DESC tlasScratchBufferDesc = tlasBufferDesc;
     tlasScratchBufferDesc.Width = tlasPrebuildInfo.ScratchDataSizeInBytes;
-    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &tlasScratchBufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&resources.buffers[BUFFER_TLAS]));
+    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &tlasScratchBufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_TLAS_SCRATCH]));
+    resources.tlasInputs = tlasInputs;
+}
+
+void Resource::buildTLAS(const D3DGlobal &d3D, D3DResources &resources){
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC buildDesc = {};
+    buildDesc.Inputs = resources.tlasInputs;
+    buildDesc.DestAccelerationStructureData = resources.buffers[bufferInfo::BUFFER_TLAS]->GetGPUVirtualAddress();
+    buildDesc.ScratchAccelerationStructureData = resources.buffers[bufferInfo::BUFFER_TLAS_SCRATCH]->GetGPUVirtualAddress();
+    // buildDesc.SourceAccelerationStructureData; // If we're to update an acceleration structure, we give address of an existing acceleration structure.
+    d3D.commandLists[cmdList::RENDER]->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
+    D3D12_RESOURCE_BARRIER barrierBLAS = {};
+    barrierBLAS.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    barrierBLAS.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+    D3D12_RESOURCE_UAV_BARRIER barrierUAV = {};
+    barrierUAV.pResource = resources.buffers[bufferInfo::BUFFER_TLAS].Get();
+    barrierBLAS.UAV = barrierUAV;
+    d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &barrierBLAS);
 }
 
 void Resource::initPerFrameConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources){

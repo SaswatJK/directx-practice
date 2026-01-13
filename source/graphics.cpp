@@ -226,7 +226,7 @@ void Engine::prepareData(){
     glm::mat4* modelMatrixPtr = (glm::mat4*)perModelConstantData;
     char* startPtr = perModelConstantData;
     for(uint32_t i = 0; i < numOfModels; i++){
-        glm::mat4 tempModelMat4 = firstModels.models[i].modelMatrix;
+        glm::mat4 tempModelMat4 = firstModels.models[i].modelMatrix; // Each model's matrix is stored here.
         char* newOffsettedPtr = (256 * i) + startPtr;
         modelMatrixPtr = (glm::mat4*) newOffsettedPtr;
         *modelMatrixPtr = tempModelMat4;
@@ -235,10 +235,9 @@ void Engine::prepareData(){
     }
     perModelData.PSPArray.arr = perModelPSP;
     perModelData.PSPArray.count = numOfModels;
-    std::cout<<"Num of models is: "<<numOfModels;
     triAndQuad[0].data = quadVertices;
     triAndQuad[0].size = sizeof(quadVertices);
-    std::vector<Vertex> allModelVertices;
+    std::vector<Vertex> allModelVertices; // Best I can do is, for each scene, ahve only one descriptor, but have multiple own CPU side abstractions, over VSP, which is sent to the BLAS, so BLAS knows what each model is, and we don't need to worry about having too many views and desciprotsr.
     for(uint32_t i = 0; i < numOfModels; i++){
         allModelVertices.insert(allModelVertices.end(),
             firstModels.models[i].vertices.begin(),
@@ -248,7 +247,7 @@ void Engine::prepareData(){
     triAndQuad[1].size = allModelVertices.size() * sizeof(Vertex);
     DataArray vertexData = {};
     vertexData.VSPArray.arr = triAndQuad;
-    vertexData.VSPArray.count = 3;
+    vertexData.VSPArray.count = 2;
     PtrSizePair modelQuadIn[2];
     std::vector<Face> allModelFaceIndices;
     for(uint32_t i = 0; i < numOfModels; i++){
