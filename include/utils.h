@@ -28,6 +28,51 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <wrl/client.h>
 
+typedef enum{
+    ARENA_NO_SPACE_FOR_COMMIT = 322,
+    ARENA_NO_SPACE_FOR_DATA,
+    ARENA_CREATION_FAILURE,
+    ARENA_COMMIT_FAILURE,
+    ARENA_FREE_FAILURE,
+    ARENA_CANT_DELETE_RESERVED,
+    ARENA_CANT_DELETE_NULL,
+    ARENA_OK
+}ARENA_ERROR;
+
+typedef uint32_t u32;
+typedef uint64_t u64;
+typedef int32_t i32;
+typedef float f32;
+
+#define KiB(x) ((x) * 1024ULL)
+#define MiB(x) ((x) * 1024ULL * 1024ULL)
+#define GiB(x) ((x) * 1024ULL * 1024ULL * 1024ULL)
+
+#define INSERT_ARRAY_IN_ARENA(arena, type, num, dataPointer, newPointer) (arena).insertData((dataPointer), (num) * sizeof(type), reinterpret_cast<void**>(&(newPointer)))
+#define INITIALIZE_ARRAY_IN_ARENA(arena, type, num, newPointer) (arena).insertData(NULL, (num) * sizeof(type), reinterpret_cast<void**>(&(newPointer)))
+#define INSERT_OBJECT_IN_ARENA(arena, type, dataPointer, newPointer) (arena).insertData((dataPointer), sizeof(type), reinterpret_cast<void**>(&(newPointer)))
+#define INITIALIZE_OBJECT_IN_ARENA(arena, type, newPointer) (arena).insertData(NULL, sizeof(type), reinterpret_cast<void**>(&(newPointer)))
+#define DELETE_DATA_IN_ARENA(arena, type, num) (arena).removeData((num) * sizeof(type))
+#define GET_POINTER_IN_ARENA(arena, type, newPointer) (arena).castPointer(reinterpret_cast<void**>(&(newPointer)))
+#define PUSH_POINTER_IN_ARENA(arena, type, num) (arena).pushPointer(sizeof(type) * (num))
+
+typedef struct ArenaStruct{
+    ARENA_ERROR reserveArena(u64 sizeInBytes);
+    ARENA_ERROR commitArena(u64 sizeInBytes);
+    ARENA_ERROR insertData(void* data, u64 sizeInBytes, void** outMemoryPointer);
+    ARENA_ERROR removeData(u64 sizeInBytes);
+    ARENA_ERROR castPointer(void** outMemoryPointer);
+    ARENA_ERROR pushPointer(u32 offsetInBytes);
+    ARENA_ERROR removeArena();
+private:
+    u64 arenaSize; // Size of arena.
+    u64 arenaSizeCommitted;
+    u64 arenaSizeLeftReserved;
+    u64 arenaSizeLeftInCommitted;
+    void* arenaBasePointer;
+    void* arenaLatestPointer;
+}Arena;
+
 typedef enum {
     PRIMARY = 0,
     ALLOCATOR_COUNT
@@ -102,6 +147,26 @@ typedef struct{
     glm::vec4 normal;
 }Vertex;
 
+typedef struct{
+    void* data; //Pointer to a resource.
+    UINT size; //Size in bytes, of the resouce.
+}PtrSizePair;
+
+typedef struct{
+    Vertex* data; //Pointer to a vector/array of vertex array.
+    UINT size; //Size in bytes, of the vertex vertex array, for each view.
+}VertexSizePair;
+
+typedef union {
+    struct {
+        PtrSizePair* arr;
+        size_t count;
+    } PSPArray;
+    struct {
+        VertexSizePair* arr;
+        size_t count;
+    } VSPArray;
+} DataArray;
 
 //ALl have 8 byte alignment.
 typedef struct D3DResourceStruct{
