@@ -218,48 +218,30 @@ void Engine::prepareData(){
     glm::vec4* viewPos = (glm::vec4*)projMatR;
     *viewPos = camera->getVFront();
     Models firstModels;
-    firstModels.loadModels("../resources/modelInfo.txt");
+    ModelData* models = firstModels.loadModels("../resources/modelInfo.txt", MiB(10));
     unsigned int numOfModels = firstModels.models.size();
-    perModelConstantData = (char*)malloc(256 * numOfModels);
-    DataArray perModelData = {};
-    PtrSizePair* perModelPSP = new PtrSizePair[numOfModels]; //Cause array should be compile time.
-    glm::mat4* modelMatrixPtr = (glm::mat4*)perModelConstantData;
-    char* startPtr = perModelConstantData;
-    for(uint32_t i = 0; i < numOfModels; i++){
-        glm::mat4 tempModelMat4 = firstModels.models[i].modelMatrix; // Each model's matrix is stored here.
-        char* newOffsettedPtr = (256 * i) + startPtr;
-        modelMatrixPtr = (glm::mat4*) newOffsettedPtr;
-        *modelMatrixPtr = tempModelMat4;
-        perModelPSP[i].data = modelMatrixPtr;
-        perModelPSP[i].size = sizeof(tempModelMat4);
+    u32 allModelIndicesSize = 0;
+    u32 allModelVerticesSize = 0;
+    for(u32 i = 0; i < models->modelIndices->PSPArray.count; i++){
+        allModelIndicesSize += models->modelIndices->PSPArray.arr[i].size;
+        allModelVerticesSize += models->modelVertices->VSPArray.arr[i].size;
     }
-    perModelData.PSPArray.arr = perModelPSP;
-    perModelData.PSPArray.count = numOfModels;
+    perModelConstantData = (char*)malloc(256 * numOfModels);
     triAndQuad[0].data = quadVertices;
     triAndQuad[0].size = sizeof(quadVertices);
-    std::vector<Vertex> allModelVertices; // Best I can do is, for each scene, ahve only one descriptor, but have multiple own CPU side abstractions, over VSP, which is sent to the BLAS, so BLAS knows what each model is, and we don't need to worry about having too many views and desciprotsr.
-    for(uint32_t i = 0; i < numOfModels; i++){
-        allModelVertices.insert(allModelVertices.end(),
-            firstModels.models[i].vertices.begin(),
-            firstModels.models[i].vertices.end());
-    }
-    triAndQuad[1].data = allModelVertices.data();
-    triAndQuad[1].size = allModelVertices.size() * sizeof(Vertex);
+    // Best I can do is, for each scene, ahve only one descriptor, but have multiple own CPU side abstractions, over VSP, which is sent to the BLAS, so BLAS knows what each model is, and we don't need to worry about having too many views and desciprotsr.
+    triAndQuad[1].data = models->modelVertices->VSPArray.arr->data;
+    triAndQuad[1].size = allModelVerticesSize;
     DataArray vertexData = {};
     vertexData.VSPArray.arr = triAndQuad;
     vertexData.VSPArray.count = 2;
     PtrSizePair modelQuadIn[2];
-    std::vector<Face> allModelFaceIndices;
-    for(uint32_t i = 0; i < numOfModels; i++){
-        allModelFaceIndices.insert(allModelFaceIndices.end(),
-            firstModels.models[i].faces.begin(),
-            firstModels.models[i].faces.end());
-    }
-    modelQuadIn[0].data = allModelFaceIndices.data();
-    modelQuadIn[0].size = allModelFaceIndices.size() * sizeof(Face);
-    modelIndices.push_back(allModelFaceIndices.size() * 3);
+    modelQuadIn[0].data = models->modelIndices->PSPArray.arr->data; //BECAUSE CONTIGUOUS;
+    modelQuadIn[0].size = allModelIndicesSize;
+    modelIndices.push_back(allModelIndicesSize / sizeof(u32));
     modelQuadIn[1].data = quadIndices;
     modelQuadIn[1].size = sizeof(quadIndices);
+    std::cout<<"The count of indices is: "<<modelIndices[0]<<"\n";
     DataArray indexData = {};
     indexData.PSPArray.arr = modelQuadIn;
     indexData.PSPArray.count = 2;
@@ -273,8 +255,7 @@ void Engine::prepareData(){
     UINT totalSizeByCount = (getVSPDataSize(vertexData)/65536) + 1;
     totalSizeByCount += (getPSPDataSize(indexData)/65536) + 1;
     totalSizeByCount += (getPSPDataSize(perFrameConstantBufferData)/65536) + 1;
-    totalSizeByCount += (getPSPDataSize(perModelData)/65536) + 1;
-    std::cout<<"The total size is going to be:"<<totalSizeByCount<<"\n";
+    totalSizeByCount += (getPSPDataSize(*models->modelMatrices)/65536) + 1;
     //Creating upload Heap.
     Heap::createHeap(totalSizeByCount, heapInfo::HEAP_UPLOAD, d3D, resource);
     //PrintDebugMessages();
@@ -307,7 +288,7 @@ void Engine::prepareData(){
     Resource::init2DTexture(textureData, textureWidth, textureHeight, nrChannels, DXGI_FORMAT_R8G8B8A8_UNORM, fenceValue, d3D, resource);
     constantBufferOffset = resource.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
     Resource::initPerFrameConstantBuffer(perFrameConstantBufferData, d3D, resource);
-    Resource::initPerModelConstantBuffer(perModelData, d3D, resource);
+    Resource::initPerModelConstantBuffer(*models->modelMatrices, d3D, resource);
     //PrintDebugMessages();
     fenceValue++;
     //Creating a bindless root singature.
