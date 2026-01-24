@@ -5,28 +5,7 @@
 #include <wrl/client.h>
 #include <cstdint>
 #include <vector>
-#include <importer.h>
-
-typedef struct{
-    void* data; //Pointer to a resource.
-    UINT size; //Size in bytes, of the resouce.
-}PtrSizePair;
-
-typedef struct{
-    Vertex* data; //Pointer to a vector/array of vertex array.
-    UINT size; //Size in bytes, of the vertex vertex array, for each view.
-}VertexSizePair;
-
-typedef union {
-    struct {
-        PtrSizePair* arr;
-        size_t count;
-    } PSPArray;
-    struct {
-        VertexSizePair* arr;
-        size_t count;
-    } VSPArray;
-} DataArray;
+#include "importer.h"
 
 UINT getPSPDataSize(const DataArray &data);
 UINT getVSPDataSize(const DataArray &data);
@@ -42,7 +21,7 @@ namespace Resource{
     //I am so confused, I wasted so many hours thinking of a data agnostinc way of uplaoding to buffers but I know what I will upload in the vertex and constant buffer tho... I guess it'll be useful for constant and intermmediate bufferse?
     void initVertexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources); //width should be the sum of the data.
     void initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);
-    void initBLAS(const DataArray &vertexData, const DataArray &indexData, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources);
+    void initBLAS(const DataArray &vertexData, const DataArray &indexData, const DataArray &modelMat, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources);
     void buildBLAS(const D3DGlobal &d3D, D3DResources &resources);
     void initTLAS(const DataArray &vertexData, const DataArray &indexData, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources);
     void buildTLAS(const D3DGlobal &d3D, D3DResources &resources);

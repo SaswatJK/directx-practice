@@ -180,7 +180,7 @@ void Resource::initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DR
     }
 }
 
-void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData, const Models &models, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources){
+void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData, const DataArray &modelMat, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources){
     D3D12_RAYTRACING_GEOMETRY_DESC geoDesc; // I need to save theses descs.
     // I would want each BLAS to be confined to each loaded model, as each has it's own model transform.
     // Object in this case refers to anything that uses the same texture and has the same or similar attributes: Roughness, Specularity etc.
@@ -204,12 +204,12 @@ void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData,
     blasBufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blasPrebuildInfo = {};
-    for(size_t i = 0; i < models.models.size(); i++){ // We don't want the quad to be used here?
+    for(size_t i = 0; i < vertexData.VSPArray.count; i++){ // We don't want the quad to be used here?
         Microsoft::WRL::ComPtr<ID3D12Resource> tempResource;
-        size_t vertexCount = models.models[i].vertices.size();
-        size_t currentModelSize = sizeof(Vertex) * vertexCount;
-        size_t indexCount = models.models[i].faces.size() * 3;
-        size_t currentModelIndexSize = indexCount * sizeof(uint32_t);
+        size_t currentModelSize = vertexData.VSPArray.arr[i].size;
+        size_t vertexCount = currentModelSize / sizeof(Vertex);
+        size_t currentModelIndexSize = indexData.PSPArray.arr[i].size;
+        size_t indexCount = currentModelIndexSize / sizeof(u32);
         geoDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
         geoDesc.Flags = geometryFlags;
         geoDesc.Triangles.VertexBuffer.StartAddress = resources.buffers[bufferInfo::BUFFER_VERTEX]->GetGPUVirtualAddress() + vertexStartOffset;
@@ -219,7 +219,7 @@ void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData,
         geoDesc.Triangles.IndexCount = indexCount;
         geoDesc.Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
         geoDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
-        glm::mat4 transposed = glm::transpose(models.models[i].modelMatrix);
+        glm::mat4 transposed = glm::transpose(*reinterpret_cast<glm::mat4*>(modelMat.PSPArray.arr[i].data)); //NOTE: This may have some crazy pointer errors!
         memcpy(&geoDesc.Triangles.Transform3x4, &transposed[0], sizeof(float) * 12);
         // Okay so basically, we need to, for each of these guys, give a model matrix, so each "object" gets transformed.
         // Now since I don't want to change the position currently, I will give the transform right now.
@@ -471,15 +471,27 @@ void Resource::initPerModelConstantBuffer(const DataArray &data, const D3DGlobal
     //There will already be the camera and other constant data in the 0'th offset.
     for(UINT i = 0; i < numBuffers; i++){
         UINT8* destPtr = mappedData + (i * dataSize);
-        memcpy(destPtr, data.PSPArray.arr[i].data, 256);
+        memcpy(destPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
     }
-/*    float* f = reinterpret_cast<float*>(mappedData);
+    /*
+    for(UINT i = 0; i < numBuffers; i++){
+        float* f = reinterpret_cast<float*>(data.PSPArray.arr[i].data);
+        for(UINT j = 0; j < 16; j++){
+            printf("%f ", f[j]);
+            if((j + 1) % 4 == 0)
+                printf("\n");
+        }
+        printf("\n");
+    }*/
+    /*
+    float* f = reinterpret_cast<float*>(mappedData);
         for (int i = 0; i < 16*4; ++i) {
             if (i % 4 == 0) printf("\nvec%d: ", i/4);
             printf("%f ", f[i]);
         }
-        printf("\n");*/
-   resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Unmap(0, nullptr);
+        printf("\n");
+    */
+    resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Unmap(0, nullptr);
 
     D3D12_GPU_VIRTUAL_ADDRESS baseAddress = resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->GetGPUVirtualAddress();
     UINT descriptorSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
