@@ -341,8 +341,6 @@ void Engine::render(){
                 running = false;
                 break;
             }
-        // areDownMov   || areDownDir
-        // 0bWASDCtSp00 || 0bLRUpDn0000
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
@@ -371,6 +369,9 @@ void Engine::render(){
             ImGui::Text("%04d: Some text", n);
         ImGui::EndChild();
         ImGui::End();
+
+        // areDownMov   || areDownDir
+        // 0bWASDCtSp00 || 0bLRUpDn0000
 
         SHORT stateW = GetAsyncKeyState('W');
         SHORT stateA = GetAsyncKeyState('A');

@@ -28,17 +28,6 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <wrl/client.h>
 
-typedef enum{
-    ARENA_NO_SPACE_FOR_COMMIT = 322,
-    ARENA_NO_SPACE_FOR_DATA,
-    ARENA_CREATION_FAILURE,
-    ARENA_COMMIT_FAILURE,
-    ARENA_FREE_FAILURE,
-    ARENA_CANT_DELETE_RESERVED,
-    ARENA_CANT_DELETE_NULL,
-    ARENA_OK
-}ARENA_ERROR;
-
 typedef uint32_t u32;
 typedef uint64_t u64;
 typedef int32_t i32;
@@ -56,22 +45,16 @@ typedef float f32;
 #define GET_POINTER_IN_ARENA(arena, type, newPointer) (arena).castPointer(reinterpret_cast<void**>(&(newPointer)))
 #define PUSH_POINTER_IN_ARENA(arena, type, num) (arena).pushPointer(sizeof(type) * (num))
 
-typedef struct ArenaStruct{
-    ARENA_ERROR reserveArena(u64 sizeInBytes);
-    ARENA_ERROR commitArena(u64 sizeInBytes);
-    ARENA_ERROR insertData(void* data, u64 sizeInBytes, void** outMemoryPointer);
-    ARENA_ERROR removeData(u64 sizeInBytes);
-    ARENA_ERROR castPointer(void** outMemoryPointer);
-    ARENA_ERROR pushPointer(u32 offsetInBytes);
-    ARENA_ERROR removeArena();
-private:
-    u64 arenaSize; // Size of arena.
-    u64 arenaSizeCommitted;
-    u64 arenaSizeLeftReserved;
-    u64 arenaSizeLeftInCommitted;
-    void* arenaBasePointer;
-    void* arenaLatestPointer;
-}Arena;
+typedef enum{
+    ARENA_NO_SPACE_FOR_COMMIT = 322,
+    ARENA_NO_SPACE_FOR_DATA,
+    ARENA_CREATION_FAILURE,
+    ARENA_COMMIT_FAILURE,
+    ARENA_FREE_FAILURE,
+    ARENA_CANT_DELETE_RESERVED,
+    ARENA_CANT_DELETE_NULL,
+    ARENA_OK
+}ARENA_ERROR;
 
 typedef enum {
     PRIMARY = 0,
@@ -167,6 +150,23 @@ typedef union {
         size_t count;
     } VSPArray;
 } DataArray;
+
+typedef struct ArenaStruct{
+    ARENA_ERROR reserveArena(u64 sizeInBytes);
+    ARENA_ERROR commitArena(u64 sizeInBytes);
+    ARENA_ERROR insertData(void* data, u64 sizeInBytes, void** outMemoryPointer);
+    ARENA_ERROR removeData(u64 sizeInBytes);
+    ARENA_ERROR castPointer(void** outMemoryPointer);
+    ARENA_ERROR pushPointer(u32 offsetInBytes);
+    ARENA_ERROR gemoveArena();
+private:
+    u64 arenaSize; // Size of arena.
+    u64 arenaSizeCommitted;
+    u64 arenaSizeLeftReserved;
+    u64 arenaSizeLeftInCommitted;
+    void* arenaBasePointer;
+    void* arenaLatestPointer;
+}Arena;
 
 //ALl have 8 byte alignment.
 typedef struct D3DResourceStruct{

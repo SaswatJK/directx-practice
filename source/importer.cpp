@@ -189,12 +189,13 @@ ModelData* Models::loadModels(const std::string &modelInfoPath, u32 minModelSize
     }
     printf("The index in 'models' is: %d\n", models[0].aFaces->indices[0]);
     ARENA_ERROR error;
-    DataArray* tempPtr;
-    error = GET_POINTER_IN_ARENA(vertexArena, DataArray, tempPtr);
+    DataArray* dataPtr;
+    error = GET_POINTER_IN_ARENA(vertexArena, DataArray, dataPtr);
     if (error != ARENA_OK) std::cerr<<"Arena: "<<error;
-    data.modelVertices = tempPtr;
-    data.modelIndices = tempPtr + 1;
-    data.modelMatrices = tempPtr + 2;
+    // Putting the information about the models also in the vertex areana.
+    data.modelVertices = dataPtr;
+    data.modelIndices = dataPtr + 1;
+    data.modelMatrices = dataPtr + 2;
     error = PUSH_POINTER_IN_ARENA(vertexArena, DataArray, 3);
     if (error != ARENA_OK) std::cerr<<"Arena: "<<error;
     VertexSizePair* vertexVSP;
