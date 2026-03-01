@@ -831,7 +831,7 @@ void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResourc
     samplerTable.pDescriptorRanges = &samplerRange;
 
     //Root parameters define how resoureces are bound to the pipeline. We right now use descriptor tables, which are just pointers to a fixed range of data in a descriptor heap. One root parameter can onyl contain one descriptor table, so only one slice, which is why more than one may be required.
-    D3D12_ROOT_PARAMETER rootParams[3] = {};
+    D3D12_ROOT_PARAMETER rootParams[4] = {};
     rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     rootParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     rootParams[0].DescriptorTable = srvTable;
@@ -844,8 +844,13 @@ void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResourc
     rootParams[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     rootParams[2].DescriptorTable = samplerTable;
 
+    rootParams[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+    rootParams[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    rootParams[3].Descriptor.ShaderRegister = 100;
+    rootParams[3].Descriptor.RegisterSpace = 0;
+
     D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
-    rsDesc.NumParameters = 3; //Can have more than one descriptor table
+    rsDesc.NumParameters = 4; //Can have more than one descriptor table
 
     rsDesc.pParameters = rootParams; //Pointer to an array of descriptor tables if they are multiple of them.
     rsDesc.NumStaticSamplers = 0;
@@ -958,4 +963,8 @@ void PipelineState::createGraphicsPSO(psoInfo info, const Shader &shader, bool d
         std::cerr<<"Creation of graphics pipeline state object: "<<info<<" has failed";
         return;
     }
+}
+
+void PipelineState::createDXRPSO(psoInfo info, const Shader &shader, bool depthEable, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources){
+
 }

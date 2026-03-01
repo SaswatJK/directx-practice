@@ -39,6 +39,8 @@ namespace RootSignature{
     void createBindlessRootSignature(const D3DGlobal &d3D, D3DResources &resources);
 }
 
+// Basically: DXR uses compute pipeline instead of graphics piepline.
 namespace PipelineState{
     void createGraphicsPSO(psoInfo info, const Shader &shader, bool depthEnable, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources);
+    void createDXRPSO(psoInfo info, const Shader &shader, bool depthEable, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources);
 }
