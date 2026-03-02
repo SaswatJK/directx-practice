@@ -74,7 +74,6 @@ typedef enum {
 
 typedef enum {
     PSO_RENDER = 0,
-    PSO_RAYTRACING,
     PSO_PRESENT,
     PSO_COUNT
 }psoInfo;
@@ -88,6 +87,7 @@ typedef enum {
     BUFFER_TLAS_DESC,
     BUFFER_TLAS,
     BUFFER_TLAS_SCRATCH,
+    BUFFER_MATRICES_BLAS,
     BUFFER_COUNT
 }bufferInfo;
 
@@ -158,7 +158,7 @@ typedef struct ArenaStruct{
     ARENA_ERROR removeData(u64 sizeInBytes);
     ARENA_ERROR castPointer(void** outMemoryPointer);
     ARENA_ERROR pushPointer(u32 offsetInBytes);
-    ARENA_ERROR gemoveArena();
+    ARENA_ERROR removeArena();
 private:
     u64 arenaSize; // Size of arena.
     u64 arenaSizeCommitted;
@@ -170,20 +170,33 @@ private:
 
 //ALl have 8 byte alignment.
 typedef struct D3DResourceStruct{
+    UINT32 heapOffsets[heapInfo::HEAP_COUNT] = {0};
+    UINT32 descriptorInHeapCount[dhInfo::DH_COUNT] = {0};
+    UINT32 eachDescriptorCount[viewInfo::VIEW_COUNT] = {0};
+
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> texture2Ds; //All the textures that will be used at once.
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> BLAS; // All the BLASes.
+    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoDescs; // All the geometry (in this case each model is a geometry)'s descs.
+    std::vector<D3D12_VERTEX_BUFFER_VIEW> vbViews;
+    std::vector<D3D12_INDEX_BUFFER_VIEW> ibViews;
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlasInputs; // Right now I only have one TLAS.
+
     Microsoft::WRL::ComPtr<ID3D12Heap> heaps[heapInfo::HEAP_COUNT]; //All the heaps that will be used at once.
     Microsoft::WRL::ComPtr<ID3D12Resource> buffers[bufferInfo::BUFFER_COUNT]; //All the buffer resources that will be used at once.
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> descriptorHeaps[dhInfo::DH_COUNT]; //All the descriptor heaps that will be used at once.
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineStates[psoInfo::PSO_COUNT];
-    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> texture2Ds; //All the textures that will be used at once.
+
     Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature; // I think I can get away with only one root signature because of bindless.
-    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> BLAS; // All the BLASes.
-    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geoDescs; // All the geometry (in this case each model is a geometry)'s descs.
-    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS tlasInputs; // Right now I only have one TLAS.
-    std::vector<D3D12_VERTEX_BUFFER_VIEW> vbViews;
-    std::vector<D3D12_INDEX_BUFFER_VIEW> ibViews;
-    UINT32 heapOffsets[heapInfo::HEAP_COUNT] = {0};
-    UINT32 descriptorInHeapCount[dhInfo::DH_COUNT] = {0};
-    UINT32 eachDescriptorCount[viewInfo::VIEW_COUNT] = {0};
+    Microsoft::WRL::ComPtr<ID3D12Resource> shaderBindingTable; // Table for all the shaders for RT.
+    Microsoft::WRL::ComPtr<ID3D12StateObject> rayTracingState;
+
+    D3D12_GPU_VIRTUAL_ADDRESS rayGenTableAddress;   //Table address for all the ray gen shaders.
+    D3D12_GPU_VIRTUAL_ADDRESS hitGroupTableAddress; // Same for group shaders.
+    D3D12_GPU_VIRTUAL_ADDRESS missTableAddress;     // Same for miss shaders.
+
+    UINT shaderRecordSize;
+    UINT hitGroupTableSize;
+    UINT hitGroupTableStride;
 }D3DResources;
 
 typedef struct D3DGlobalStruct{ //prefix of x meaning it's dxgi
