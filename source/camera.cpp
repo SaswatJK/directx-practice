@@ -1,4 +1,4 @@
-#include "../include/camera.h"
+#include "camera.h"
 #include "glm/ext/matrix_clip_space.hpp"
 #include "glm/ext/matrix_transform.hpp"
 #include "glm/geometric.hpp"
@@ -8,7 +8,8 @@ Camera::Camera(glm::vec3 initPos, glm::vec3 initDir, glm::vec3 initUp) : vEye(in
     glm::vec3 targetPos = vEye + vFront;
     vRight = glm::normalize(glm::cross(vFront, vUp));
     matView = glm::lookAtRH(vEye, targetPos, vUp);
-    matProj = glm::perspectiveRH_ZO(float(glm::radians(60.0f)), 1.0f, 0.1f, 10000.0f); //could make my own frustum but this is far simpler and more effective afaik
+    fov = float(glm::radians(60.0f));
+    matProj = glm::perspectiveRH_ZO(fov, 1.0f, 0.1f, 10000.0f); //could make my own frustum but this is far simpler and more effective afaik
     glm::vec3 sunPos = {-20, 50, 0};
     matTestProj = glm::perspectiveRH_ZO(float(glm::radians(30.0f)), 0.5f, 0.1f, 10000.0f);
     matTestView = glm::lookAtRH(sunPos, targetPos, vUp);
@@ -28,5 +29,5 @@ void Camera::updateCamera(glm::vec3 changePos, glm::vec3 changeDir) {
     vUp = glm::vec4(glm::normalize(glm::cross(vRight, vFront)), 0.0);
     glm::vec3 targetPos = glm::vec3(vEye) + glm::vec3(vFront);
     matView = glm::lookAtRH(glm::vec3(vEye), targetPos, glm::vec3(vUp));
-    matProj = glm::perspectiveRH_ZO(float(glm::radians(60.0f)), 1.0f, 0.1f, 10000.0f); //could make my own frustum but this is far simpler and more effective afaik
+    matProj = glm::perspectiveRH_ZO(fov, 1.0f, 0.1f, 10000.0f); //could make my own frustum but this is far simpler and more effective afaik
 }

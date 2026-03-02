@@ -11,6 +11,7 @@ private:
     glm::mat4 matProj;
     glm::mat4 matTestView;
     glm::mat4 matTestProj;
+    float fov;
 public:
     Camera(glm::vec3 initPos, glm::vec3 initDir, glm::vec3 initUp);
     void updateCamera(glm::vec3 changePos, glm::vec3 changeDir);
@@ -19,4 +20,8 @@ public:
     glm::mat4 getMatTestView() { return matTestView; }
     glm::mat4 getMatTestProj() { return matTestProj; }
     glm::vec4 getVFront() { return glm::vec4(vFront, 0.0); }
+    glm::vec4 getVEye()   { return glm::vec4(vEye, 0.0);   }
+    glm::vec4 getVRight() { return glm::vec4(vRight, 0.0); }
+    glm::vec4 getVUp()    { return glm::vec4(vUp, 0.0);    }
+    float     getFOV()    { return fov;                    }
 };
