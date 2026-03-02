@@ -23,16 +23,18 @@ namespace Resource{
     void initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);
     void initBLAS(const DataArray &vertexData, const DataArray &indexData, const DataArray &modelMat, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources);
     void buildBLAS(const D3DGlobal &d3D, D3DResources &resources);
-    void initTLAS(const DataArray &vertexData, const DataArray &indexData, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources);
+    void initTLAS(const D3DGlobal &d3D, D3DResources &resources);
     void buildTLAS(const D3DGlobal &d3D, D3DResources &resources);
     void initPerFrameConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);
     void updateConstantBuffer(const DataArray &data, bufferInfo buffer, const D3DGlobal &d3D, D3DResources &resources);
     void initPerModelConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources);
     void createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, textureTypeInfo type ,const D3DGlobal &d3D, D3DResources &resources); //For like RTVs for frame buffers.
+    void createGPUTextureXR(UINT width, UINT height, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources);
     void createBackBuffers(UINT width, UINT height, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources); //For like the 2 back buffers.
     void init2DTexture(void* data, UINT width, UINT height, UINT nrChannels, DXGI_FORMAT format, UINT fenceValue, const D3DGlobal &d3D, D3DResources &resources); //Copy stuff from intermeddiate buffer/upload heap to default heap. The question is, should I use createpalcedresource for the intermeddiate case or createcommittedreosurce
     void createSimpleSampler(const D3DGlobal &d3D, D3DResources &resources);
     void createSimpleDepthStencil(UINT width, UINT height, const D3DGlobal &d3D, D3DResources &resources);
+    void createShaderBindingTable(const D3DGlobal& d3D, D3DResources& resources);
 };
 
 namespace RootSignature{
@@ -42,5 +44,5 @@ namespace RootSignature{
 // Basically: DXR uses compute pipeline instead of graphics piepline.
 namespace PipelineState{
     void createGraphicsPSO(psoInfo info, const Shader &shader, bool depthEnable, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources);
-    void createDXRPSO(psoInfo info, const Shader &shader, bool depthEable, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources);
+    void createDXRSO(const Shader &shader, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources);
 }

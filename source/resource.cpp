@@ -2,6 +2,7 @@
 #include "D3D12/d3d12.h"
 #include "D3D12/dxgicommon.h"
 #include "D3D12/dxgiformat.h"
+#include "shader.h"
 #include "utils.h"
 #include <basetsd.h>
 #include <climits>
@@ -181,9 +182,36 @@ void Resource::initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DR
 }
 
 void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData, const DataArray &modelMat, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources){
-    D3D12_RAYTRACING_GEOMETRY_DESC geoDesc; // I need to save theses descs.
+    D3D12_RAYTRACING_GEOMETRY_DESC geoDesc = {}; // I need to save theses descs.
     // I would want each BLAS to be confined to each loaded model, as each has it's own model transform.
     // Object in this case refers to anything that uses the same texture and has the same or similar attributes: Roughness, Specularity etc.
+
+    D3D12_RESOURCE_DESC transformBufDesc = {};
+    transformBufDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    transformBufDesc.Width = sizeof(float) * 12 * vertexData.VSPArray.count;
+    transformBufDesc.Height = 1;
+    transformBufDesc.DepthOrArraySize = 1;
+    transformBufDesc.MipLevels = 1;
+    transformBufDesc.SampleDesc.Count = 1;
+    transformBufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    d3D.device->CreateCommittedResource(
+        &uploadHeapProperties,
+        D3D12_HEAP_FLAG_NONE,
+        &transformBufDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_MATRICES_BLAS])
+        );
+
+    float* mappedTransforms = nullptr;
+    resources.buffers[bufferInfo::BUFFER_MATRICES_BLAS]->Map(0, nullptr, (void**)&mappedTransforms);
+    for (size_t i = 0; i < vertexData.VSPArray.count; i++) {
+        glm::mat4 transposed = glm::transpose(*reinterpret_cast<glm::mat4*>(modelMat.PSPArray.arr[i].data));
+        memcpy(mappedTransforms + (i * 12), &transposed[0], sizeof(float) * 12);
+    }
+    resources.buffers[bufferInfo::BUFFER_MATRICES_BLAS]->Unmap(0, nullptr);
+
     D3D12_GPU_VIRTUAL_ADDRESS vertexStartAddress = resources.buffers[BUFFER_VERTEX]->GetGPUVirtualAddress();
     D3D12_GPU_VIRTUAL_ADDRESS indexStartAddress = resources.buffers[BUFFER_INDEX]->GetGPUVirtualAddress();
     UINT64 maxScratchBufferSize = 0;
@@ -202,6 +230,7 @@ void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData,
     blasBufferDesc.SampleDesc = sampleDesc;
     blasBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     blasBufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    resources.geoDescs.reserve(vertexData.VSPArray.count);
 
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blasPrebuildInfo = {};
     for(size_t i = 0; i < vertexData.VSPArray.count; i++){ // We don't want the quad to be used here?
@@ -218,9 +247,10 @@ void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData,
         geoDesc.Triangles.VertexCount = vertexCount;
         geoDesc.Triangles.IndexCount = indexCount;
         geoDesc.Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
-        geoDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        // https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ns-d3d12-d3d12_raytracing_geometry_triangles_desc 32 byte rgba is not supported in DXR.
+        geoDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
         glm::mat4 transposed = glm::transpose(*reinterpret_cast<glm::mat4*>(modelMat.PSPArray.arr[i].data)); //NOTE: This may have some crazy pointer errors!
-        memcpy(&geoDesc.Triangles.Transform3x4, &transposed[0], sizeof(float) * 12);
+        geoDesc.Triangles.Transform3x4 = resources.buffers[bufferInfo::BUFFER_MATRICES_BLAS]->GetGPUVirtualAddress() + (i * sizeof(float) * 12);
         // Okay so basically, we need to, for each of these guys, give a model matrix, so each "object" gets transformed.
         // Now since I don't want to change the position currently, I will give the transform right now.
         vertexStartOffset += currentModelSize;
@@ -231,8 +261,8 @@ void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData,
         blasInputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD; // Check and see the performance if I change it to PREFER_FAST_TRACE instead.
         blasInputs.NumDescs = 1;
         blasInputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-        blasInputs.pGeometryDescs = &geoDesc;
         resources.geoDescs.push_back(geoDesc);
+        blasInputs.pGeometryDescs = &resources.geoDescs.back();
         d3D.device->GetRaytracingAccelerationStructurePrebuildInfo(&blasInputs, &blasPrebuildInfo);
         if(maxScratchBufferSize < blasPrebuildInfo.ScratchDataSizeInBytes)
             maxScratchBufferSize = blasPrebuildInfo.ScratchDataSizeInBytes;
@@ -243,7 +273,17 @@ void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData,
     }
     D3D12_RESOURCE_DESC blasScratchBufferDesc = blasBufferDesc;
     blasScratchBufferDesc.Width = maxScratchBufferSize;
-    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &blasScratchBufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_BLAS_SCRATCH]));
+    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &blasScratchBufferDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_BLAS_SCRATCH]));
+    D3D12_RESOURCE_BARRIER blasBarrier = {};
+    blasBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    blasBarrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+    D3D12_RESOURCE_TRANSITION_BARRIER blasTransition = {};
+    blasTransition.pResource = resources.buffers[bufferInfo::BUFFER_BLAS_SCRATCH].Get();
+    blasTransition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES; //Transition all subresources at the same time when transitioning state of a resource.
+    blasTransition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+    blasTransition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    blasBarrier.Transition = blasTransition;
+    d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &blasBarrier);//A resource barrier is a command you insert into a command list to inform the GPU driver that a resource (like a texture or buffer) is about to be used in a different way than before. This helps the GPU synchronize access to that resource and avoid hazards such as reading while writing or using stale data.
 }
 
 void Resource::buildBLAS(const D3DGlobal &d3D, D3DResources &resources){
@@ -270,7 +310,7 @@ void Resource::buildBLAS(const D3DGlobal &d3D, D3DResources &resources){
     }
 }
 
-void Resource::initTLAS(const DataArray &vertexData, const DataArray &indexData, D3D12_RAYTRACING_GEOMETRY_FLAGS geometryFlags, const D3DGlobal &d3D, D3DResources &resources){
+void Resource::initTLAS(const D3DGlobal &d3D, D3DResources &resources){
     // One TLAS with multiple instances is the way to go. And multiple inscanes can each point to the same BLAS, or be referring to the same BLAS multiple times with their own transforms.
     std::vector<D3D12_RAYTRACING_INSTANCE_DESC> instanceDescs;
     for(size_t i = 0; i < resources.BLAS.size(); i++){
@@ -325,8 +365,18 @@ void Resource::initTLAS(const DataArray &vertexData, const DataArray &indexData,
 
     D3D12_RESOURCE_DESC tlasScratchBufferDesc = tlasBufferDesc;
     tlasScratchBufferDesc.Width = tlasPrebuildInfo.ScratchDataSizeInBytes;
-    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &tlasScratchBufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_TLAS_SCRATCH]));
+    d3D.device->CreateCommittedResource(&defaultHeapProperties, D3D12_HEAP_FLAG_NONE, &tlasScratchBufferDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_TLAS_SCRATCH]));
     resources.tlasInputs = tlasInputs;
+    D3D12_RESOURCE_BARRIER tlasBarrier = {};
+    tlasBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    tlasBarrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+    D3D12_RESOURCE_TRANSITION_BARRIER tlasTransition = {};
+    tlasTransition.pResource = resources.buffers[bufferInfo::BUFFER_TLAS_SCRATCH].Get();
+    tlasTransition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES; //Transition all subresources at the same time when transitioning state of a resource.
+    tlasTransition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+    tlasTransition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    tlasBarrier.Transition = tlasTransition;
+    d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &tlasBarrier);//A resource barrier is a command you insert into a command list to inform the GPU driver that a resource (like a texture or buffer) is about to be used in a different way than before. This helps the GPU synchronize access to that resource and avoid hazards such as reading while writing or using stale data.
 }
 
 void Resource::buildTLAS(const D3DGlobal &d3D, D3DResources &resources){
@@ -377,12 +427,13 @@ void Resource::initPerFrameConstantBuffer(const DataArray &data, const D3DGlobal
         memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
         currentPtr += data.PSPArray.arr[i].size;
     }
-/*    float* f = reinterpret_cast<float*>(mappedData);
+    /*  float* f = reinterpret_cast<float*>(mappedData);
         for (int i = 0; i < 16*4; ++i) {
             if (i % 4 == 0) printf("\nvec%d: ", i/4);
             printf("%f ", f[i]);
         }
-        printf("\n");*/
+        printf("\n");
+    */
     resources.buffers[BUFFER_PER_FRAME_CONSTANT]->Unmap(0, nullptr);
     resources.heapOffsets[heapInfo::HEAP_UPLOAD] += 65536;
     D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {}; //We are assuming right now that we only have one constant buffer view..
@@ -433,7 +484,6 @@ void Resource::updateConstantBuffer(const DataArray &data, bufferInfo buffer, co
         printf("\n");*/
         resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Unmap(0, nullptr);
     }
-
 }
 
 void Resource::initPerModelConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources){
@@ -626,7 +676,71 @@ void Resource::createGPUTexture(UINT width, UINT height, DXGI_FORMAT format, tex
     }
 }
 
-void Resource::init2DTexture(void* data, UINT width, UINT height, UINT nrChannels, DXGI_FORMAT format, UINT fenceValue,const D3DGlobal &d3D, D3DResources &resources){
+void Resource::createGPUTextureXR(UINT width, UINT height, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources){
+    D3D12_RESOURCE_DESC desc = {};
+    DXGI_SAMPLE_DESC sampleDesc = {1, 0};
+    desc.SampleDesc = sampleDesc;
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width = width;
+    desc.Height = height;
+    desc.Format = format;
+    desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels = 1;
+    desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;  // ← CHANGED: UAV instead of RTV
+    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+    resources.texture2Ds.push_back(resource);
+    HRESULT hr = d3D.device->CreateCommittedResource(
+        &defaultHeapProperties, 
+        D3D12_HEAP_FLAG_NONE, 
+        &desc,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        nullptr,
+        IID_PPV_ARGS(&resources.texture2Ds.back())
+    );
+
+    if(FAILED(hr)){
+        std::cerr << "UAV Texture creation failed!";
+        return;
+    }
+
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+    uavDesc.Format = format;
+    uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    uavDesc.Texture2D.MipSlice = 0;
+    uavDesc.Texture2D.PlaneSlice = 0;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE handle = resources.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetCPUDescriptorHandleForHeapStart();
+    UINT descriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    UINT currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+    handle.ptr += currentDescriptorHeapOffset;
+
+    d3D.device->CreateUnorderedAccessView(resources.texture2Ds.back().Get(), nullptr, &uavDesc, handle);
+    resources.eachDescriptorCount[viewInfo::VIEW_UAV] = resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+    resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV]++;
+
+    // For reading after raytracer writes.
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = format;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Texture2D.MipLevels = 1;
+    srvDesc.Texture2D.MostDetailedMip = 0;
+
+    handle = resources.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetCPUDescriptorHandleForHeapStart();
+    currentDescriptorHeapOffset = descriptorIncrementSize * resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+    handle.ptr += currentDescriptorHeapOffset;
+
+    d3D.device->CreateShaderResourceView(resources.texture2Ds.back().Get(), &srvDesc, handle);
+
+    resources.eachDescriptorCount[viewInfo::VIEW_SRV] = resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+    resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV]++;
+}
+
+// TODO : REMEMBER TO CHANGE THIS FUNCITON TO NOT USE FENCE AFTER EVERY TEXTURE UPLOAD!!!
+void Resource::init2DTexture(void* data, UINT width, UINT height, UINT nrChannels, DXGI_FORMAT format, UINT fenceValue, const D3DGlobal &d3D, D3DResources &resources){
     //Thinking if I should upload all textures at once and just create different views?? I think so cause I will hav eto do it regardless.
     D3D12_RESOURCE_DESC desc = {};
     DXGI_SAMPLE_DESC sampleDesc = {}; //Multisampling, mandatory to fill even for resources that don't make sense
@@ -787,6 +901,91 @@ void Resource::createSimpleDepthStencil(UINT width, UINT height, const D3DGlobal
     createGPUTexture(width, height, DXGI_FORMAT_D32_FLOAT, textureTypeInfo::TEX_TYPE_DEPTH, d3D, resources);
 }
 
+void Resource::createShaderBindingTable(const D3DGlobal& d3D, D3DResources& resources) {
+    // Shader table is just an array of pointers to shaders.
+    // There is no dedicated API. Just write to a memory block.
+    // Shader ID = "pointer" to a shader (32 byte blob).
+    // Hit group = { Intersection || Any hit Shader || Closest hit Shader }.
+    // Hit group is treated as a shader ID itself, and we can reference an entire group in the shader record.
+    // Shader Record = { Shader ID || Local root arguments }.
+    // Shader Table =>  Shader Record X, Shader Record Y.
+
+    Microsoft::WRL::ComPtr<ID3D12StateObjectProperties> stateObjectProps;
+    resources.rayTracingState->QueryInterface(IID_PPV_ARGS(&stateObjectProps));
+
+    //Shader IDs.
+    void* rayGenID = stateObjectProps->GetShaderIdentifier(L"RayGen");
+    void* missID = stateObjectProps->GetShaderIdentifier(L"Miss");
+    void* hitGroupID = stateObjectProps->GetShaderIdentifier(L"MyHitGroup");
+
+    const UINT shaderIdentifierSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;  // 32 byte.
+
+    const UINT shaderRecordSize = shaderIdentifierSize;  // Just ID (No root arguments for the specific records).
+    const UINT shaderRecordSizeAligned = (shaderRecordSize + 63) & ~63;  // Align to 64.
+
+    UINT rayGenTableSize = shaderRecordSizeAligned;
+    UINT missTableSize = shaderRecordSizeAligned;
+    UINT hitGroupTableSize = shaderRecordSizeAligned * resources.BLAS.size();  // Per BLAS.
+
+    UINT totalSize = rayGenTableSize + missTableSize + hitGroupTableSize;
+
+    // Create SBT buffer on the upload heap.
+    // Would be better if instead of committing, we placed resource to the CPU. The problem is, we calculate an upload heap at the start.
+    // We can create more upload heaps, just for this, after wards and do manual memory management within it.
+
+    D3D12_RESOURCE_DESC sbtBufferDesc = {};
+    sbtBufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    sbtBufferDesc.Width = totalSize;
+    sbtBufferDesc.Height = 1;
+    sbtBufferDesc.DepthOrArraySize = 1;
+    sbtBufferDesc.MipLevels = 1;
+    sbtBufferDesc.Format = DXGI_FORMAT_UNKNOWN;
+    sbtBufferDesc.SampleDesc.Count = 1;
+    sbtBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    sbtBufferDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> sbtBuffer;
+    d3D.device->CreateCommittedResource(
+        &uploadHeapProperties,
+        D3D12_HEAP_FLAG_NONE,
+        &sbtBufferDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&sbtBuffer)
+    );
+
+    //  Write only the shader IDs for a record, as there's no root arguments.
+    uint8_t* mappedData;
+    sbtBuffer->Map(0, nullptr, (void**)&mappedData);
+    uint8_t* currentPtr = mappedData;
+
+    // Remember that there's probably only going to be one ray generation shader for most scenes.
+    memcpy(currentPtr, rayGenID, shaderIdentifierSize);
+    currentPtr += rayGenTableSize;
+
+    // Same with the miss shader, probably only one per scene (that paints the skybox or something).
+    memcpy(currentPtr, missID, shaderIdentifierSize);
+    currentPtr += missTableSize;
+
+    // Hit Group table, for each BLAS, we assume one hitgroup, as each can have different materials and what not.
+    for (size_t i = 0; i < resources.BLAS.size(); i++) {
+        memcpy(currentPtr, hitGroupID, shaderIdentifierSize);
+        currentPtr += shaderRecordSizeAligned;
+    }
+
+    sbtBuffer->Unmap(0, nullptr);
+
+    resources.shaderBindingTable = sbtBuffer;
+
+    D3D12_GPU_VIRTUAL_ADDRESS sbtAddress = sbtBuffer->GetGPUVirtualAddress();
+    resources.rayGenTableAddress = sbtAddress;
+    resources.missTableAddress = sbtAddress + rayGenTableSize;
+    resources.hitGroupTableAddress = sbtAddress + rayGenTableSize + missTableSize;
+    resources.hitGroupTableStride = shaderRecordSizeAligned;
+    resources.shaderRecordSize = shaderRecordSizeAligned;
+    resources.hitGroupTableSize = hitGroupTableSize;
+}
+
 void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResources &resources){
     //Descriptor range defines a contiguous sequence of resource descriptors of a specific type within a descriptor table. Like the 'width' of a slice, that is descriptor table, of a data, that is descriptor heap.
     D3D12_DESCRIPTOR_RANGE srvRange = {};
@@ -817,6 +1016,13 @@ void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResourc
     samplerRange.RegisterSpace = 0;
     samplerRange.OffsetInDescriptorsFromTableStart = 0;
 
+    D3D12_DESCRIPTOR_RANGE uavRange = {};
+    uavRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    uavRange.NumDescriptors = 100;
+    uavRange.BaseShaderRegister = 0; // u0, u1, u2, ... in shader
+    uavRange.RegisterSpace = 0;
+    uavRange.OffsetInDescriptorsFromTableStart = 0;
+
     D3D12_ROOT_DESCRIPTOR_TABLE srvTable = {};
     srvTable.NumDescriptorRanges = 1;
     srvTable.pDescriptorRanges = &srvRange;
@@ -830,8 +1036,12 @@ void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResourc
     samplerTable.NumDescriptorRanges = 1;
     samplerTable.pDescriptorRanges = &samplerRange;
 
+    D3D12_ROOT_DESCRIPTOR_TABLE uavTable = {};
+    uavTable.NumDescriptorRanges = 1;
+    uavTable.pDescriptorRanges = &uavRange;
+
     //Root parameters define how resoureces are bound to the pipeline. We right now use descriptor tables, which are just pointers to a fixed range of data in a descriptor heap. One root parameter can onyl contain one descriptor table, so only one slice, which is why more than one may be required.
-    D3D12_ROOT_PARAMETER rootParams[4] = {};
+    D3D12_ROOT_PARAMETER rootParams[5] = {};
     rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
     rootParams[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     rootParams[0].DescriptorTable = srvTable;
@@ -849,8 +1059,12 @@ void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResourc
     rootParams[3].Descriptor.ShaderRegister = 100;
     rootParams[3].Descriptor.RegisterSpace = 0;
 
+    rootParams[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    rootParams[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    rootParams[4].DescriptorTable = uavTable;
+
     D3D12_ROOT_SIGNATURE_DESC rsDesc = {};
-    rsDesc.NumParameters = 4; //Can have more than one descriptor table
+    rsDesc.NumParameters = 5; //Can have more than one descriptor table
 
     rsDesc.pParameters = rootParams; //Pointer to an array of descriptor tables if they are multiple of them.
     rsDesc.NumStaticSamplers = 0;
@@ -952,12 +1166,12 @@ void PipelineState::createGraphicsPSO(psoInfo info, const Shader &shader, bool d
     psoDesc.NodeMask = 0; //Remember just like the 'NodeMask' in the createrootsignature method, this is for multiGPU systems where we are using node masks to choose between GPUs.
     psoDesc.pRootSignature = resources.rootSignature.Get();
     SimpleShaderByteCode byteCode = shader.getShaderByteCode();
-    if (byteCode.vsByteCode.pShaderBytecode == nullptr || byteCode.vsByteCode.BytecodeLength == 0) {
+    if (byteCode.ByteCode.VSPS.vsByteCode.pShaderBytecode == nullptr || byteCode.ByteCode.VSPS.vsByteCode.BytecodeLength == 0) {
     std::cerr << "Invalid vertex shader bytecode\n";
     return;
 }
-    psoDesc.VS = byteCode.vsByteCode;
-    psoDesc.PS = byteCode.psByteCode;
+    psoDesc.VS = byteCode.ByteCode.VSPS.vsByteCode;
+    psoDesc.PS = byteCode.ByteCode.VSPS.psByteCode;
     HRESULT hr = d3D.device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&resources.pipelineStates[info]));
     if(FAILED(hr)){
         std::cerr<<"Creation of graphics pipeline state object: "<<info<<" has failed";
@@ -965,6 +1179,92 @@ void PipelineState::createGraphicsPSO(psoInfo info, const Shader &shader, bool d
     }
 }
 
-void PipelineState::createDXRPSO(psoInfo info, const Shader &shader, bool depthEable, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources){
+void PipelineState::createDXRSO(const Shader &shader, DXGI_FORMAT format, const D3DGlobal &d3D, D3DResources &resources){
+    std::vector<D3D12_STATE_SUBOBJECT> subobjects;
 
+    // One single HLSL file will be made avilable to be refered by name into the number of exports.
+    D3D12_EXPORT_DESC exports[3];  // Ray generation, Miss shader, and ClosestHit.
+
+    SimpleShaderByteCode tempShaderByteCode = shader.getShaderByteCode();
+    if(tempShaderByteCode.ByteCode.VSPS.psByteCode.pShaderBytecode != nullptr){
+        std::cerr<<"Wrong shader for the RTX state object\n";
+    }
+    D3D12_SHADER_BYTECODE shaderBytecode = shader.getShaderByteCode().ByteCode.rtxByteCode;
+
+    exports[0].Name = L"RayGen";
+    exports[0].ExportToRename = nullptr;
+    exports[0].Flags = D3D12_EXPORT_FLAG_NONE;
+
+    exports[1].Name = L"Miss";
+    exports[1].ExportToRename = nullptr;
+    exports[1].Flags = D3D12_EXPORT_FLAG_NONE;
+
+    exports[2].Name = L"ClosestHit"; // Remember that we can have more than just the Closest hit. We have any hit and ray intersection as well. Those can also be a part of the hitgroup. (All 3 including Closest hit are optional).
+    exports[2].ExportToRename = nullptr;
+    exports[2].Flags = D3D12_EXPORT_FLAG_NONE;
+
+    // DirectX Intermmediate Language.
+    D3D12_DXIL_LIBRARY_DESC dxilLibDesc = {};
+    dxilLibDesc.DXILLibrary = shaderBytecode;
+    dxilLibDesc.NumExports = 3;
+    dxilLibDesc.pExports = exports;
+
+    D3D12_STATE_SUBOBJECT dxilLib = {};
+    dxilLib.Type = D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY;
+    dxilLib.pDesc = &dxilLibDesc;
+    subobjects.push_back(dxilLib);
+
+    // Creating a hit group (will be referenced later by the shader records inside the shader table).
+    D3D12_HIT_GROUP_DESC hitGroupDesc = {};
+    hitGroupDesc.HitGroupExport = L"MyHitGroup";
+    hitGroupDesc.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+    hitGroupDesc.ClosestHitShaderImport = L"ClosestHit";
+    hitGroupDesc.AnyHitShaderImport = nullptr;
+    hitGroupDesc.IntersectionShaderImport = nullptr;
+
+    D3D12_STATE_SUBOBJECT hitGroup = {};
+    hitGroup.Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
+    hitGroup.pDesc = &hitGroupDesc;
+    subobjects.push_back(hitGroup);
+
+    // Payload attributes.
+    D3D12_RAYTRACING_SHADER_CONFIG shaderConfigDesc = {};
+    shaderConfigDesc.MaxPayloadSizeInBytes = 12;  // float3 color = 12 bytes
+    shaderConfigDesc.MaxAttributeSizeInBytes = 8;  // float2 barycentrics = 8 bytes
+
+    D3D12_STATE_SUBOBJECT shaderConfig = {};
+    shaderConfig.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG;
+    shaderConfig.pDesc = &shaderConfigDesc;
+    subobjects.push_back(shaderConfig);
+
+    // Pipeline Config - max recursion depth
+    D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfigDesc = {};
+    pipelineConfigDesc.MaxTraceRecursionDepth = 1; // Very simple Ray tracing.
+
+    D3D12_STATE_SUBOBJECT pipelineConfig = {};
+    pipelineConfig.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG;
+    pipelineConfig.pDesc = &pipelineConfigDesc;
+    subobjects.push_back(pipelineConfig);
+
+    D3D12_GLOBAL_ROOT_SIGNATURE globalRootSigDesc = {};
+    globalRootSigDesc.pGlobalRootSignature = resources.rootSignature.Get();
+
+    D3D12_STATE_SUBOBJECT globalRootSig = {};
+    globalRootSig.Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE;
+    globalRootSig.pDesc = &globalRootSigDesc;
+    subobjects.push_back(globalRootSig);
+
+    // Finally creating the final state object.
+    D3D12_STATE_OBJECT_DESC stateObjectDesc = {};
+    stateObjectDesc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
+    stateObjectDesc.NumSubobjects = subobjects.size();
+    stateObjectDesc.pSubobjects = subobjects.data();
+
+    Microsoft::WRL::ComPtr<ID3D12StateObject> raytracingStateObject;
+    HRESULT hr = d3D.device->CreateStateObject(&stateObjectDesc, IID_PPV_ARGS(&raytracingStateObject));
+    if(FAILED(hr)){
+        std::cerr << "Creation of raytracing state object failed\n";
+        return;
+    }
+    resources.rayTracingState = raytracingStateObject;
 }
