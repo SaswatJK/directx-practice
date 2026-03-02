@@ -5,8 +5,6 @@
 #include "../include/imgui_impl_sdl3.h"
 #include "../include/imgui_impl_dx12.h"
 #include "camera.h"
-#include "glm/detail/qualifier.hpp"
-#include "glm/ext/matrix_float4x4.hpp"
 #include "../include/shader.h"
 #include "../include/utils.h"
 #include "../include/D3D12/d3d12.h"
@@ -194,29 +192,24 @@ void Engine::prepareData(){
     //NOTE: I should send this to other functions like camera functins and model functions so they can just slot their matrix in easily.
     perFrameConstantData = (char*)malloc(256);
     memset(perFrameConstantData, 0, 256);
-    glm::vec4* color = (glm::vec4*)perFrameConstantData;
-    *color = {0.0f, 0.5f, 0.5f, 1.0f};
-    glm::vec4* metallic = color + 1;
-    *metallic = {1.0f, 0.2f, 0.0f, 1.0f};
-    glm::mat4 tempViewMat4 = camera->getMatView();
-    glm::mat4 tempProjMat4 = camera->getMatProj();
-    metallic += 1;
-    //Give the mat4 as 4 vec4s
-    glm::mat4* viewMatR = (glm::mat4*)metallic;
-    *viewMatR = tempViewMat4;
-    glm::mat4* projMatR = viewMatR + 1;
-    *projMatR = tempProjMat4;
-    //*currentDrawIndex = {0, 0.0f, 0.0f, 0.0f};
-    //glm::vec4* 
+    glm::vec4* data = (glm::vec4*)perFrameConstantData;
+    *data = camera->getVEye();
+    data++;
+    *data = camera->getVFront();
+    data++;
+    *data = camera->getVRight();
+    data++;
+    *data = camera->getVUp();
+    data++;
+    float* fovData = (float*)data;
+    *fovData = camera->getFOV();
+    fovData++;
+
     int textureWidth, textureHeight, nrChannels;
     std::string texturePath = "../resources/practicetexture.png";
     unsigned char* textureData = stbi_load(texturePath.c_str(), &textureWidth, &textureHeight, &nrChannels, 0);
     if (textureData == nullptr)
         std::cout<<"Texture data can't be opened in memory!";
-    VertexSizePair triAndQuad[2]; //Makes them congiguous.
-    projMatR = projMatR + 1;
-    glm::vec4* viewPos = (glm::vec4*)projMatR;
-    *viewPos = camera->getVFront();
     Models firstModels;
     ModelData* models = firstModels.loadModels("../resources/modelInfo.txt", MiB(10));
     unsigned int numOfModels = firstModels.models.size();
@@ -227,11 +220,14 @@ void Engine::prepareData(){
         allModelVerticesSize += models->modelVertices->VSPArray.arr[i].size;
     }
     perModelConstantData = (char*)malloc(256 * numOfModels);
-    triAndQuad[0].data = quadVertices;
-    triAndQuad[0].size = sizeof(quadVertices);
+
+    // Cause the BLAS and TLAS start reading from the start of the vertex buffer, we will make it easy for ourselves and just put the models before the quad.
+    VertexSizePair triAndQuad[2]; //Makes them congiguous.
+    triAndQuad[0].data = models->modelVertices->VSPArray.arr->data;
+    triAndQuad[0].size = allModelVerticesSize;
+    triAndQuad[1].data = quadVertices;
+    triAndQuad[1].size = sizeof(quadVertices);
     // Best I can do is, for each scene, ahve only one descriptor, but have multiple own CPU side abstractions, over VSP, which is sent to the BLAS, so BLAS knows what each model is, and we don't need to worry about having too many views and desciprotsr.
-    triAndQuad[1].data = models->modelVertices->VSPArray.arr->data;
-    triAndQuad[1].size = allModelVerticesSize;
     DataArray vertexData = {};
     vertexData.VSPArray.arr = triAndQuad;
     vertexData.VSPArray.count = 2;
@@ -267,6 +263,13 @@ void Engine::prepareData(){
     //PrintDebugMessages();
     Resource::initIndexBuffer(indexData, d3D, resource);
     //PrintDebugMessages();
+    // D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE : When rays encounter this geometry, the geometry acts as if no any hit shader is present.
+
+    Resource::initBLAS(*models->modelVertices, *models->modelIndices, *models->modelMatrices, D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE, d3D, resource);
+    PrintDebugMessages();
+    Resource::initTLAS(d3D, resource);
+    PrintDebugMessages();
+
     Heap::createDescriptorHeap(dhInfo::DH_RTV, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, d3D, resource);
     //PrintDebugMessages();
     //Creating the back buffers.
@@ -278,10 +281,16 @@ void Engine::prepareData(){
     Resource::createBackBuffers(windowWidth, windowHeight, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
     //PrintDebugMessages();
     //Creating the gBuffer. Turns out I am not using my default heap for anything right now... Will figure out later.
-    renderTextureOffset = resource.texture2Ds.size();
-    Resource::createGPUTexture(windowWidth, windowHeight, DXGI_FORMAT_R16G16B16A16_UNORM, textureTypeInfo::TEX_TYPE_RGBA, d3D, resource);
-    Heap::createDescriptorHeap(dhInfo::DH_DSV, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, d3D, resource);
-    Resource::createSimpleDepthStencil(windowWidth, windowHeight, d3D, resource);
+    //renderTextureOffset = resource.texture2Ds.size();
+    // For rasterization : Created RTV.
+    //Resource::createGPUTexture(windowWidth, windowHeight, DXGI_FORMAT_R16G16B16A16_UNORM, textureTypeInfo::TEX_TYPE_RGBA, d3D, resource);
+    // For ray tracing : Create UAV.
+    rtxUAVOffset = resource.texture2Ds.size();
+    uavDescriptorOffset = resource.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+    Resource::createGPUTextureXR(windowWidth, windowHeight, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
+    // No DSV needed for ray tracing.
+    //Heap::createDescriptorHeap(dhInfo::DH_DSV, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, d3D, resource);
+    //Resource::createSimpleDepthStencil(windowWidth, windowHeight, d3D, resource);
     Heap::createDescriptorHeap(dhInfo::DH_SAMPLER, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
     Heap::createDescriptorHeap(dhInfo::DH_IMGUI_SRV, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, d3D, resource);
     Resource::createSimpleSampler(d3D, resource);
@@ -294,11 +303,38 @@ void Engine::prepareData(){
     //Creating a bindless root singature.
     RootSignature::createBindlessRootSignature(d3D, resource);
     //Creating the first pipeline state.
-    Shader renderShader("../shaders/simple.vsh","../shaders/simple.psh");
-    PipelineState::createGraphicsPSO(psoInfo::PSO_RENDER, renderShader, true, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
-    Shader quadShader("../shaders/quad.vsh", "../shaders/quad.psh");
+    Shader rayTraceShader;
+    rayTraceShader.CompileShader("../shaders/raytracing.hlsl");
+    PipelineState::createDXRSO(rayTraceShader, DXGI_FORMAT_R16G16B16A16_UNORM, d3D, resource);
+    PrintDebugMessages();
+    Resource::createShaderBindingTable(d3D, resource);
+    Shader quadShader;
+    quadShader.CompileShader("../shaders/quad.vsh", "../shaders/quad.psh");
     PipelineState::createGraphicsPSO(psoInfo::PSO_PRESENT, quadShader, false, DXGI_FORMAT_R8G8B8A8_UNORM, d3D, resource);
     PrintDebugMessages();
+
+    Resource::buildBLAS(d3D, resource);
+    PrintDebugMessages();
+    Resource::buildTLAS(d3D, resource);
+    PrintDebugMessages();
+
+    d3D.commandLists[cmdList::RENDER]->Close();
+    ID3D12CommandList* cLists[] = { d3D.commandLists[cmdList::RENDER].Get() };
+    d3D.commandQueue->ExecuteCommandLists(_countof(cLists), cLists);
+    hr = d3D.commandQueue->Signal(d3D.fence.Get(), fenceValue); // Will tell the GPU after finishing all the currently queued commands, set the fence to the fence value. It will se the GPU fence value to the fence value variable provided through this method. Basically saying hey commandqueue, after you finish, at this address (given by the fence), put the value (given by fencevalue).
+    if(FAILED(hr)){
+        std::cerr<<"Command queue signal failed!";
+        return;
+    }
+    if (d3D.fence->GetCompletedValue() < fenceValue) { // If the value in the fence object is less than the 'fence value' variable, then that means that the command queue has not finished yet, as the command queue will set the value in the fence object to be fence value after finishing.
+        hr = d3D.fence->SetEventOnCompletion(fenceValue, d3D.fenceEvent); // Basically will say that if the fence's value is the value provided through the 'fencevalue' variable, then fenceevent should be "signaled". "Signaling" in this context means that the fence object will notify a event handle if that happens.
+        if(FAILED(hr)){
+            std::cerr<<"Failed to set fence event on completion in the rendering loop!";
+            return;
+        }
+        WaitForSingleObject(d3D.fenceEvent, INFINITE); // Basically saying that the CPU thread should wait an 'INFINITE' amount of time until event has been signaled. The thread will do other things, and the reason we don't just run an infinite loop instead, checking and seeing if the fence value is reached or not, is because the thread will not be free for other tasks + the memory will keep being accessed over and over again, which may not be bad since cache, but it'll waste the other 64-8 bytes in the cache.
+    }
+    fenceValue++;
 }
 
 void Engine::render(){
@@ -312,8 +348,6 @@ void Engine::render(){
         return;
     }
     UINT frameIndex = 0;
-    d3D.commandLists[cmdList::RENDER]->Close();
-
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -404,8 +438,6 @@ void Engine::render(){
             DataArray perFrameConstantBufferData = {};
             PtrSizePair constantBufferPairs[1];
             glm::vec4* start = (glm::vec4*)perFrameConstantData;
-            start += 2;
-            glm::mat4* viewMat = (glm::mat4*)start;
             xMovChange = (areDownMovement & 0b01010000) ?
                                 (areDownMovement & 0b01000000) ? -eachStep : eachStep
                                 : 0;
@@ -423,9 +455,18 @@ void Engine::render(){
                                 : 0;
 
             camera->updateCamera(glm::vec3(xMovChange, yMovChange, zMovChange), glm::vec3(xDirChange, yDirChange, 0));
-            *viewMat = camera->getMatView();
-            glm::mat4* projMat = viewMat + 1;
-            *projMat = camera->getMatProj();
+            glm::vec4* data = (glm::vec4*)perFrameConstantData;
+            *data = camera->getVEye();
+            data++;
+            *data = camera->getVFront();
+            data++;
+            *data = camera->getVRight();
+            data++;
+            *data = camera->getVUp();
+            data++;
+            float* fovData = (float*)data;
+            *fovData = camera->getFOV();
+            fovData++;
             constantBufferPairs->data = perFrameConstantData;
             constantBufferPairs->size = 256;
             perFrameConstantBufferData.PSPArray.arr = constantBufferPairs;
@@ -437,24 +478,38 @@ void Engine::render(){
             std::cerr<<"Command allocator is reset during the start of each frame, and it couldn't reset!";
             return;
         }
-        hr = d3D.commandLists[cmdList::RENDER]->Reset(d3D.commandAllocators[cmdAllocator::PRIMARY].Get(), resource.pipelineStates[psoInfo::PSO_RENDER].Get());
+        // Initial pipeline state is "set" during reset. But ray tracing state is not accepted. So will set it after this.
+        hr = d3D.commandLists[cmdList::RENDER]->Reset(d3D.commandAllocators[cmdAllocator::PRIMARY].Get(), nullptr);
         if(FAILED(hr)){
             std::cerr<<"Command list is reset during the start of each frame, and it couldn't reset!";
             return;
         }
-        d3D.commandLists[cmdList::RENDER]->SetGraphicsRootSignature(resource.rootSignature.Get());
-        // RTV heaps that we use for presenting to the screen, and not for rendering to a frame buffer or for re-use by the shader, do not need to be set with SetDescriptorHeaps, they are instead set by OMSetRenderTarget. If I wanted to reuse those render targets, then I should create a frame buffer and while creating the rtv in the RTVHeapDesc, I should have used the flag for ALLOW_RENDER_TARGET. Now I can re-use the same RTVs for both Framebuffer and for the swapchain, but then the swapchain format would need to be the same as the RTV format, and we will lose lots of information with only 1 byte for each color channel.
+        d3D.commandLists[cmdList::RENDER]->SetPipelineState1(resource.rayTracingState.Get());
+        // Ray tracing uses compute.
+        d3D.commandLists[cmdList::RENDER]->SetComputeRootSignature(resource.rootSignature.Get());
+        //d3D.commandLists[cmdList::RENDER]->SetGraphicsRootSignature(resource.rootSignature.Get());
+
+        // RTV heaps that we use for presenting to the screen, and not for rendering to a frame buffer or for re-use by the shader, do not need to be set with SetDescriptorHeaps, they are instead set by OMSetRenderTarget. If I wanted to reuse those render targets, then I should create a frame buffer and while creating the rtv in the RTVHeapDesc, I should have used the flag for ALLOW_RENDER_TARGET. I can re-use the same RTVs for both Framebuffer and for the swapchain, but then the swapchain format would need to be the same as the RTV format, and we will lose lots of information with only 1 byte for each color channel.
+
         ID3D12DescriptorHeap* dHeaps[] = { resource.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV].Get(), resource.descriptorHeaps[dhInfo::DH_SAMPLER].Get() }; //No RTV here because they're not shader visible.
         d3D.commandLists[cmdList::RENDER]->SetDescriptorHeaps(_countof(dHeaps), dHeaps);
-        d3D.commandLists[cmdList::RENDER]->SetGraphicsRootDescriptorTable(0, //Root parameter index, base register + index (b0, b1, and dependingly...) in the shader. If range says 5 descriptors, then it will basically start from that base register range and from the uniform heap pointer, and then allocate 5 consecutive descriptors.
+
+        // Changing graphicsrootdescriptortable to comptue.
+        d3D.commandLists[cmdList::RENDER]->SetComputeRootDescriptorTable(0, //Root parameter index, base register + index (b0, b1, and dependingly...) in the shader. If range says 5 descriptors, then it will basically start from that base register range and from the uniform heap pointer, and then allocate 5 consecutive descriptors.
                                                                 resource.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetGPUDescriptorHandleForHeapStart());
-        resource.descriptorHeaps[0]->GetGPUDescriptorHandleForHeapStart();
-        D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle = resource.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetGPUDescriptorHandleForHeapStart();
+        d3D.commandLists[cmdList::RENDER]->SetComputeRootShaderResourceView(3, resource.buffers[bufferInfo::BUFFER_TLAS]->GetGPUVirtualAddress());
+        D3D12_GPU_DESCRIPTOR_HANDLE uavHandle = resource.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetGPUDescriptorHandleForHeapStart();
         UINT descriptorSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        uavHandle.ptr += descriptorSize * constantBufferOffset;
+        d3D.commandLists[cmdList::RENDER]->SetComputeRootDescriptorTable(4, uavHandle);
+
+        D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle = resource.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetGPUDescriptorHandleForHeapStart();
+        descriptorSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         cbvHandle.ptr += descriptorSize * constantBufferOffset;
-        d3D.commandLists[cmdList::RENDER]->SetGraphicsRootDescriptorTable(1, cbvHandle);
-        //d3D.commandLists[cmdList::RENDER]->SetGraphicsRootDescriptorTable(1, gHandle);
-        d3D.commandLists[cmdList::RENDER]->SetGraphicsRootDescriptorTable(2, resource.descriptorHeaps[dhInfo::DH_SAMPLER]->GetGPUDescriptorHandleForHeapStart());
+        d3D.commandLists[cmdList::RENDER]->SetComputeRootDescriptorTable(1, cbvHandle);
+
+        d3D.commandLists[cmdList::RENDER]->SetComputeRootDescriptorTable(2, resource.descriptorHeaps[dhInfo::DH_SAMPLER]->GetGPUDescriptorHandleForHeapStart());
+
         //Each 'slot' in the root parameter can hold anyting from one descriptor to descriptor tables. Each descriptor table can have multiple ranges. Where a range describes a contiguous block of descriptors of same type. Set a certain table. So this binds the 0'th table to the descriptorhandlestart.. So however it has defined it.
         D3D12_VIEWPORT viewPort = {}; //Viewport defines where we want to render to in the swapchain or the render target, whatever we are rendering to. So if I have a viewport of 500x500 in a 1000x1000 window, it will only render to the other 500x500
         viewPort.TopLeftX = 0.0f; //Position of X on the left
@@ -472,50 +527,87 @@ void Engine::render(){
         d3D.commandLists[cmdList::RENDER]->RSSetViewports(1, &viewPort);
         d3D.commandLists[cmdList::RENDER]->RSSetScissorRects(1, &rect);
         // Resource barrier is used when we want to use the same resource (say a texture) to write and read both, and in that case, the applicaiton will tell the GPU that this resource is in a write-ready state or read-ready state,and the GPU will wait for the transition if it's trying to read and the resource is in write-ready state. Now, since our pipeline cannot actually read the render texture, we are going to change state from 'present' meaning, to present to the swapchain, to render target, and vice-versa.
+
         D3D12_RESOURCE_BARRIER bbBarrierRender = {}; // Describes a resource barrier (transition in resource use).
         bbBarrierRender.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; //Transition of a set of subreosuces between different usages. The caller must specify the before and after usages of the subresources.
         bbBarrierRender.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
         D3D12_RESOURCE_TRANSITION_BARRIER bbTransition = {}; //Describes the transition of subresources between different usages.
-        bbTransition.pResource = resource.texture2Ds[renderTextureOffset].Get(); //First it's the render texture for firstpass.
+
+        // For ray tracing.
+        //bbTransition.pResource = resource.texture2Ds[renderTextureOffset].Get(); //First it's the render texture for firstpass.
+        bbTransition.pResource = resource.texture2Ds[rtxUAVOffset].Get();
         bbTransition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES; //Transition all subresources at the same time when transitioning state of a resource.
         bbTransition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-        bbTransition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        bbTransition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
         bbBarrierRender.Transition = bbTransition;
         d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &bbBarrierRender);//A resource barrier is a command you insert into a command list to inform the GPU driver that a resource (like a texture or buffer) is about to be used in a different way than before. This helps the GPU synchronize access to that resource and avoid hazards such as reading while writing or using stale data.
-        D3D12_CPU_DESCRIPTOR_HANDLE handle = resource.descriptorHeaps[dhInfo::DH_RTV]->GetCPUDescriptorHandleForHeapStart();
+
+        D3D12_CPU_DESCRIPTOR_HANDLE handle;
+        //D3D12_CPU_DESCRIPTOR_HANDLE handle = resource.descriptorHeaps[dhInfo::DH_RTV]->GetCPUDescriptorHandleForHeapStart();
         UINT rtvDescriptorIncrementSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-        handle.ptr += (backBufferOffset + 2) * rtvDescriptorIncrementSize; //Can do it right now because I make the G buffer as soon as I make back buffers. Pointing to the G buffer instead of one of the two back buffers.
+        //handle.ptr += (backBufferOffset + 2) * rtvDescriptorIncrementSize; //Can do it right now because I make the G buffer as soon as I make back buffers. Pointing to the G buffer instead of one of the two back buffers.
         const float clearColor[4] { 0.0f, 0.0f, 0.0f, 1.0f };
+        /*
+        // No need to clear rtv for RTX.
         d3D.commandLists[cmdList::RENDER]->ClearRenderTargetView(handle, clearColor,
                                                         0, //Number of RECTs to clear.
                                                         nullptr //Rects to clear, basically we can clear only a certain rect of the RTV if we want to.
                                                         );
 
-        //Nullptr and false since no depth/stencil.
-        D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = resource.descriptorHeaps[dhInfo::DH_DSV]->GetCPUDescriptorHandleForHeapStart();
-        d3D.commandLists[cmdList::RENDER]->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-        d3D.commandLists[cmdList::RENDER]->OMSetRenderTargets(1, &handle, FALSE, &dsvHandle);
-        d3D.commandLists[cmdList::RENDER]->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        //d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[0]);
-        d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[1]);
-        d3D.commandLists[cmdList::RENDER]->IASetIndexBuffer(&resource.ibViews[0]);
-        d3D.commandLists[cmdList::RENDER]->DrawIndexedInstanced(modelIndices[0], 1, 0, 0, 0);
+        // DSV not used for raytracing.
+        //D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = resource.descriptorHeaps[dhInfo::DH_DSV]->GetCPUDescriptorHandleForHeapStart();
+        //d3D.commandLists[cmdList::RENDER]->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+        //d3D.commandLists[cmdList::RENDER]->OMSetRenderTargets(1, &handle, FALSE, &dsvHandle);
+        */
+
+        D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
+        dispatchDesc.RayGenerationShaderRecord.StartAddress = resource.rayGenTableAddress;
+        dispatchDesc.RayGenerationShaderRecord.SizeInBytes = resource.shaderRecordSize;
+        dispatchDesc.MissShaderTable.StartAddress = resource.missTableAddress;
+        dispatchDesc.MissShaderTable.SizeInBytes = resource.shaderRecordSize;
+        dispatchDesc.MissShaderTable.StrideInBytes = resource.shaderRecordSize;
+        dispatchDesc.HitGroupTable.StartAddress = resource.hitGroupTableAddress;
+        dispatchDesc.HitGroupTable.SizeInBytes = resource.hitGroupTableSize;
+        dispatchDesc.HitGroupTable.StrideInBytes = resource.shaderRecordSize;
+        dispatchDesc.Width = windowWidth;
+        dispatchDesc.Height = windowHeight;
+        dispatchDesc.Depth = 1;
+
+        d3D.commandLists[cmdList::RENDER]->DispatchRays(&dispatchDesc);
+        D3D12_RESOURCE_BARRIER rayBarrier = {};
+        rayBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+        rayBarrier.UAV.pResource = resource.texture2Ds[rtxUAVOffset].Get();
+        d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &rayBarrier);
+        //d3D.commandLists[cmdList::RENDER]->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        //d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[1]);
+        //d3D.commandLists[cmdList::RENDER]->IASetIndexBuffer(&resource.ibViews[0]);
+        //d3D.commandLists[cmdList::RENDER]->DrawIndexedInstanced(modelIndices[0], 1, 0, 0, 0);
         PrintDebugMessages();
         //d3D.commandLists[cmdList::RENDER]->DrawInstanced(3, 1, 0, 0);
 
-        //PrintDebugMessages();
+        PrintDebugMessages();
         D3D12_RESOURCE_BARRIER bbBarrierRead = {};
         bbBarrierRead.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
         bbBarrierRead.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        bbTransition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        bbTransition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
         bbTransition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        bbTransition.pResource = resource.texture2Ds[rtxUAVOffset].Get();
         bbBarrierRead.Transition = bbTransition;
 
         d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &bbBarrierRead);
         d3D.commandLists[cmdList::RENDER]->SetPipelineState(resource.pipelineStates[psoInfo::PSO_PRESENT].Get());
+        d3D.commandLists[cmdList::RENDER]->IASetPrimitiveTopology(D3D10_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        d3D.commandLists[cmdList::RENDER]->SetGraphicsRootSignature(resource.rootSignature.Get());
+        d3D.commandLists[cmdList::RENDER]->SetGraphicsRootDescriptorTable(0, //Root parameter index, base register + index (b0, b1, and dependingly...) in the shader. If range says 5 descriptors, then it will basically start from that base register range and from the uniform heap pointer, and then allocate 5 consecutive descriptors.
+                                                                resource.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetGPUDescriptorHandleForHeapStart());
+        resource.descriptorHeaps[0]->GetGPUDescriptorHandleForHeapStart();
+        d3D.commandLists[cmdList::RENDER]->SetGraphicsRootDescriptorTable(1, cbvHandle);
+        d3D.commandLists[cmdList::RENDER]->SetGraphicsRootDescriptorTable(2, resource.descriptorHeaps[dhInfo::DH_SAMPLER]->GetGPUDescriptorHandleForHeapStart());
+
         handle = resource.descriptorHeaps[dhInfo::DH_RTV]->GetCPUDescriptorHandleForHeapStart();
         handle.ptr += (backBufferOffset + frameIndex) * rtvDescriptorIncrementSize; //Pointing to one of the back buffers instead of the G buffer to render to.
-        bbTransition.pResource = resource.texture2Ds[renderTextureOffset - 2 + frameIndex].Get();
+        //bbTransition.pResource = resource.texture2Ds[renderTextureOffset - 2 + frameIndex].Get();
+        bbTransition.pResource = resource.texture2Ds[rtxUAVOffset - 2 + frameIndex].Get();
         bbTransition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
         bbTransition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         bbBarrierRender.Transition = bbTransition;
@@ -527,10 +619,10 @@ void Engine::render(){
         bbTransition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
         bbTransition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
         bbBarrierPresent.Transition = bbTransition;
-        //PrintDebugMessages();
+        PrintDebugMessages();
         d3D.commandLists[cmdList::RENDER]->OMSetRenderTargets(1, &handle, FALSE, nullptr);
         d3D.commandLists[cmdList::RENDER]->ClearRenderTargetView(handle, clearColor, 0, nullptr);
-        d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[0]);
+        d3D.commandLists[cmdList::RENDER]->IASetVertexBuffers(0, 1, &resource.vbViews[1]);
         d3D.commandLists[cmdList::RENDER]->IASetIndexBuffer(&resource.ibViews[1]);
         d3D.commandLists[cmdList::RENDER]->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
@@ -545,10 +637,10 @@ void Engine::render(){
             std::cout<<hr;
             return;
         }
-        //PrintDebugMessages();
+        PrintDebugMessages();
         ID3D12CommandList* cLists[] = { d3D.commandLists[cmdList::RENDER].Get() };
         d3D.commandQueue->ExecuteCommandLists(_countof(cLists), cLists);
-        //PrintDebugMessages();
+        PrintDebugMessages();
         hr = d3D.xSwapChain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
         if(FAILED(hr)){
             std::cerr<<"Swapchain present failed!";
