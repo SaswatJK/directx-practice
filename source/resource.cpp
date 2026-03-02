@@ -427,13 +427,6 @@ void Resource::initPerFrameConstantBuffer(const DataArray &data, const D3DGlobal
         memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
         currentPtr += data.PSPArray.arr[i].size;
     }
-    /*  float* f = reinterpret_cast<float*>(mappedData);
-        for (int i = 0; i < 16*4; ++i) {
-            if (i % 4 == 0) printf("\nvec%d: ", i/4);
-            printf("%f ", f[i]);
-        }
-        printf("\n");
-    */
     resources.buffers[BUFFER_PER_FRAME_CONSTANT]->Unmap(0, nullptr);
     resources.heapOffsets[heapInfo::HEAP_UPLOAD] += 65536;
     D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {}; //We are assuming right now that we only have one constant buffer view..
@@ -460,12 +453,6 @@ void Resource::updateConstantBuffer(const DataArray &data, bufferInfo buffer, co
             memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
             currentPtr += data.PSPArray.arr[i].size;
         }
-/*    float* f = reinterpret_cast<float*>(mappedData);
-        for (int i = 0; i < 16*4; ++i) {
-            if (i % 4 == 0) printf("\nvec%d: ", i/4);
-            printf("%f ", f[i]);
-        }
-        printf("\n");*/
         resources.buffers[BUFFER_PER_FRAME_CONSTANT]->Unmap(0, nullptr);
     }
 
@@ -476,12 +463,6 @@ void Resource::updateConstantBuffer(const DataArray &data, bufferInfo buffer, co
             memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
             currentPtr += data.PSPArray.arr[i].size;
         }
-/*    float* f = reinterpret_cast<float*>(mappedData);
-        for (int i = 0; i < 16*4; ++i) {
-            if (i % 4 == 0) printf("\nvec%d: ", i/4);
-            printf("%f ", f[i]);
-        }
-        printf("\n");*/
         resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Unmap(0, nullptr);
     }
 }
@@ -523,24 +504,6 @@ void Resource::initPerModelConstantBuffer(const DataArray &data, const D3DGlobal
         UINT8* destPtr = mappedData + (i * dataSize);
         memcpy(destPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
     }
-    /*
-    for(UINT i = 0; i < numBuffers; i++){
-        float* f = reinterpret_cast<float*>(data.PSPArray.arr[i].data);
-        for(UINT j = 0; j < 16; j++){
-            printf("%f ", f[j]);
-            if((j + 1) % 4 == 0)
-                printf("\n");
-        }
-        printf("\n");
-    }*/
-    /*
-    float* f = reinterpret_cast<float*>(mappedData);
-        for (int i = 0; i < 16*4; ++i) {
-            if (i % 4 == 0) printf("\nvec%d: ", i/4);
-            printf("%f ", f[i]);
-        }
-        printf("\n");
-    */
     resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Unmap(0, nullptr);
 
     D3D12_GPU_VIRTUAL_ADDRESS baseAddress = resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->GetGPUVirtualAddress();

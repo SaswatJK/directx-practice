@@ -296,6 +296,7 @@ void Engine::prepareData(){
     Resource::createSimpleSampler(d3D, resource);
     Resource::init2DTexture(textureData, textureWidth, textureHeight, nrChannels, DXGI_FORMAT_R8G8B8A8_UNORM, fenceValue, d3D, resource);
     constantBufferOffset = resource.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+    std::cerr<<"Constant buffer offset is: "<<constantBufferOffset;
     Resource::initPerFrameConstantBuffer(perFrameConstantBufferData, d3D, resource);
     Resource::initPerModelConstantBuffer(*models->modelMatrices, d3D, resource);
     //PrintDebugMessages();
@@ -500,7 +501,7 @@ void Engine::render(){
         d3D.commandLists[cmdList::RENDER]->SetComputeRootShaderResourceView(3, resource.buffers[bufferInfo::BUFFER_TLAS]->GetGPUVirtualAddress());
         D3D12_GPU_DESCRIPTOR_HANDLE uavHandle = resource.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetGPUDescriptorHandleForHeapStart();
         UINT descriptorSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        uavHandle.ptr += descriptorSize * constantBufferOffset;
+        uavHandle.ptr += descriptorSize * uavDescriptorOffset;
         d3D.commandLists[cmdList::RENDER]->SetComputeRootDescriptorTable(4, uavHandle);
 
         D3D12_GPU_DESCRIPTOR_HANDLE cbvHandle = resource.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetGPUDescriptorHandleForHeapStart();
@@ -613,12 +614,6 @@ void Engine::render(){
         bbBarrierRender.Transition = bbTransition;
         d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &bbBarrierRender);
 
-        D3D12_RESOURCE_BARRIER bbBarrierPresent = {};
-        bbBarrierPresent.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-        bbBarrierPresent.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        bbTransition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        bbTransition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-        bbBarrierPresent.Transition = bbTransition;
         PrintDebugMessages();
         d3D.commandLists[cmdList::RENDER]->OMSetRenderTargets(1, &handle, FALSE, nullptr);
         d3D.commandLists[cmdList::RENDER]->ClearRenderTargetView(handle, clearColor, 0, nullptr);
@@ -630,6 +625,13 @@ void Engine::render(){
         ID3D12DescriptorHeap* imgui_heaps[] = { resource.descriptorHeaps[dhInfo::DH_IMGUI_SRV].Get() };
         d3D.commandLists[cmdList::RENDER]->SetDescriptorHeaps(1, imgui_heaps);
         ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), d3D.commandLists[cmdList::RENDER].Get());
+
+        D3D12_RESOURCE_BARRIER bbBarrierPresent = {};
+        bbBarrierPresent.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+        bbBarrierPresent.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        bbTransition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        bbTransition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+        bbBarrierPresent.Transition = bbTransition;
         d3D.commandLists[cmdList::RENDER]->ResourceBarrier(1, &bbBarrierPresent);
         hr = d3D.commandLists[cmdList::RENDER]->Close();
         if(FAILED(hr)){
@@ -644,7 +646,7 @@ void Engine::render(){
         hr = d3D.xSwapChain->Present(0, DXGI_PRESENT_ALLOW_TEARING);
         if(FAILED(hr)){
             std::cerr<<"Swapchain present failed!";
-//            return;
+            return;
         }
         hr = d3D.commandQueue->Signal(d3D.fence.Get(), fenceValue); //Will tell the GPU after finishing all the currently queued commands, set the fence to the fence value. It will se the GPU fence value to the fence value variable provided through this method. Basically saying hey commandqueue, after you finish, at this address (given by the fence), put the value (given by fencevalue).
         if(FAILED(hr)){
