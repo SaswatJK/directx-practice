@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <intsafe.h>
 #include <minwindef.h>
+#include <winnt.h>
 #include <wrl/client.h>
 
 D3D12_HEAP_PROPERTIES uploadHeapProperties = {
@@ -124,8 +125,26 @@ void Resource::initVertexBuffer(const DataArray &data, const D3DGlobal &d3D, D3D
     D3D12_VERTEX_BUFFER_VIEW vbView = {}; //I have to store these views as well... HMM
     vbView.StrideInBytes = sizeof(Vertex);
     UINT previousOffset = 0;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+    srvDesc.Buffer.StructureByteStride = sizeof(Vertex);
+    srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+    UINT numVertices;
     resources.vbViews.resize(data.VSPArray.count);
+    D3D12_CPU_DESCRIPTOR_HANDLE handle;
+    UINT descriptorSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     for(UINT i = 0; i < data.VSPArray.count; i++){
+        handle = resources.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetCPUDescriptorHandleForHeapStart();
+        handle.ptr += descriptorSize * resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+        numVertices = data.VSPArray.arr[i].size;
+        numVertices =  numVertices / sizeof(Vertex);
+        srvDesc.Buffer.FirstElement = (previousOffset / sizeof(Vertex));
+        srvDesc.Buffer.NumElements = numVertices;
+        d3D.device->CreateShaderResourceView(resources.buffers[bufferInfo::BUFFER_VERTEX].Get(), &srvDesc, handle);
+        resources.eachDescriptorCount[viewInfo::VIEW_SRV] = resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+        resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV]++;
         vbView.SizeInBytes = data.VSPArray.arr[i].size;
         vbView.BufferLocation = resources.buffers[bufferInfo::BUFFER_VERTEX]->GetGPUVirtualAddress() + previousOffset;
         previousOffset += data.VSPArray.arr[i].size;
@@ -171,9 +190,29 @@ void Resource::initIndexBuffer(const DataArray &data, const D3DGlobal &d3D, D3DR
     D3D12_INDEX_BUFFER_VIEW ibView = {};
     resources.heapOffsets[heapInfo::HEAP_UPLOAD] += (newOffset * 65536);
     ibView.Format = DXGI_FORMAT_R32_UINT;
-    UINT previousOffset = 0;
     resources.ibViews.resize(data.PSPArray.count);
+    UINT previousOffset = 0;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+    srvDesc.Buffer.StructureByteStride = sizeof(u32);
+    srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+    UINT numIndices;
+    D3D12_CPU_DESCRIPTOR_HANDLE handle;
+    auto* bufferDataPtr = resources.buffers;
+    UINT descriptorSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     for(UINT i = 0; i < data.PSPArray.count; i++){
+        handle = resources.descriptorHeaps[dhInfo::DH_SRV_CBV_UAV]->GetCPUDescriptorHandleForHeapStart();
+        handle.ptr += descriptorSize * resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+        numIndices = data.PSPArray.arr[i].size;
+        numIndices =  numIndices / sizeof(u32);
+        srvDesc.Buffer.FirstElement = (previousOffset / sizeof(u32));
+        srvDesc.Buffer.NumElements = numIndices;
+        d3D.device->CreateShaderResourceView(resources.buffers[bufferInfo::BUFFER_INDEX].Get(), &srvDesc, handle);
+        resources.eachDescriptorCount[viewInfo::VIEW_SRV] = resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
+        resources.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV]++;
+        assert(resources.buffers == bufferDataPtr && "CRITICAL: resources.buffers was corrupted!");
         ibView.SizeInBytes = data.PSPArray.arr[i].size;
         ibView.BufferLocation = resources.buffers[bufferInfo::BUFFER_INDEX]->GetGPUVirtualAddress() + previousOffset;
         previousOffset += data.PSPArray.arr[i].size;
@@ -195,7 +234,7 @@ void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData,
     transformBufDesc.SampleDesc.Count = 1;
     transformBufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-    d3D.device->CreateCommittedResource(
+    HRESULT hr = d3D.device->CreateCommittedResource(
         &uploadHeapProperties,
         D3D12_HEAP_FLAG_NONE,
         &transformBufDesc,
@@ -203,6 +242,10 @@ void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData,
         nullptr,
         IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_MATRICES_BLAS])
         );
+    if(FAILED(hr)){
+    std::cerr<<"Error creating resource for matrices for the models!";
+    return;
+    };
 
     float* mappedTransforms = nullptr;
     resources.buffers[bufferInfo::BUFFER_MATRICES_BLAS]->Map(0, nullptr, (void**)&mappedTransforms);
@@ -949,6 +992,8 @@ void Resource::createShaderBindingTable(const D3DGlobal& d3D, D3DResources& reso
     resources.hitGroupTableSize = hitGroupTableSize;
 }
 
+
+// TODO : Make different SRV spaces for vertex buffer, index buffer, textures, so I don't waste 2 hours again.
 void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResources &resources){
     //Descriptor range defines a contiguous sequence of resource descriptors of a specific type within a descriptor table. Like the 'width' of a slice, that is descriptor table, of a data, that is descriptor heap.
     D3D12_DESCRIPTOR_RANGE srvRange = {};
