@@ -3,7 +3,7 @@ struct PSInput{
     float2 texcoord : TEXCOORD0;
 };
 
-Texture2D textures[] : register(t0, space0);
+Texture2D textures[] : register(t5, space0);
 SamplerState samplers[] : register(s0, space0);
 
 float4 PSMain(PSInput input) : SV_TARGET {
