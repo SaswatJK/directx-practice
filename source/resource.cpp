@@ -249,7 +249,16 @@ void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData,
 
     float* mappedTransforms = nullptr;
     resources.buffers[bufferInfo::BUFFER_MATRICES_BLAS]->Map(0, nullptr, (void**)&mappedTransforms);
+    //printf("While making BLAS, we have %d model matrices.\n", vertexData.VSPArray.count);
     for (size_t i = 0; i < vertexData.VSPArray.count; i++) {
+    /*
+        glm::mat4 m = *reinterpret_cast<glm::mat4*>(modelMat.PSPArray.arr[i].data);
+        printf("Model matrix %zu:\n", i);
+        printf("  [%.2f %.2f %.2f %.2f]\n", m[0][0], m[1][0], m[2][0], m[3][0]);
+        printf("  [%.2f %.2f %.2f %.2f]\n", m[0][1], m[1][1], m[2][1], m[3][1]);
+        printf("  [%.2f %.2f %.2f %.2f]\n", m[0][2], m[1][2], m[2][2], m[3][2]);
+        printf("  [%.2f %.2f %.2f %.2f]\n", m[0][3], m[1][3], m[2][3], m[3][3]);
+    */
         glm::mat4 transposed = glm::transpose(*reinterpret_cast<glm::mat4*>(modelMat.PSPArray.arr[i].data));
         memcpy(mappedTransforms + (i * 12), &transposed[0], sizeof(float) * 12);
     }
@@ -274,20 +283,21 @@ void Resource::initBLAS(const DataArray &vertexData, const DataArray &indexData,
     blasBufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     blasBufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     resources.geoDescs.reserve(vertexData.VSPArray.count);
-
+    size_t totalVertexCount = 0;
+    for(size_t i = 0; i < vertexData.VSPArray.count; i++)
+        totalVertexCount += vertexData.VSPArray.arr[i].size / sizeof(Vertex);
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blasPrebuildInfo = {};
     for(size_t i = 0; i < vertexData.VSPArray.count; i++){ // We don't want the quad to be used here?
         Microsoft::WRL::ComPtr<ID3D12Resource> tempResource;
         size_t currentModelSize = vertexData.VSPArray.arr[i].size;
-        size_t vertexCount = currentModelSize / sizeof(Vertex);
         size_t currentModelIndexSize = indexData.PSPArray.arr[i].size;
         size_t indexCount = currentModelIndexSize / sizeof(u32);
         geoDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
         geoDesc.Flags = geometryFlags;
-        geoDesc.Triangles.VertexBuffer.StartAddress = resources.buffers[bufferInfo::BUFFER_VERTEX]->GetGPUVirtualAddress() + vertexStartOffset;
+        geoDesc.Triangles.VertexBuffer.StartAddress = resources.buffers[bufferInfo::BUFFER_VERTEX]->GetGPUVirtualAddress(); // I have to remember that I can't offset the vertices because the vertices of all models and indices are both contiguous.
         geoDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
         geoDesc.Triangles.IndexBuffer = resources.buffers[bufferInfo::BUFFER_INDEX]->GetGPUVirtualAddress() + indexStartOffset;
-        geoDesc.Triangles.VertexCount = vertexCount;
+        geoDesc.Triangles.VertexCount = totalVertexCount;
         geoDesc.Triangles.IndexCount = indexCount;
         geoDesc.Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
         // https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ns-d3d12-d3d12_raytracing_geometry_triangles_desc 32 byte rgba is not supported in DXR.
