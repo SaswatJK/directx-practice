@@ -5,7 +5,78 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <assimp/BaseImporter.h>
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
 
+
+void Model::loadModel(std::string &modelPath, glm::vec3 worldPos, glm::vec3 worldRotate, glm::vec3 worldScale, u32 modelIndex, u32 indicesOffset, Arena* vertexArena, Arena* indicesArena){
+    Assimp::Importer importer;
+    const aiScene* scene = importer.ReadFile(modelPath,
+        aiProcess_Triangulate        |  // Triangle faces becausemy intermeddiate representation requires triangles.
+        aiProcess_GenSmoothNormals   |  // Fill normals.
+        aiProcess_JoinIdenticalVertices
+    );
+
+    if(!scene || !scene->mRootNode || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE){
+        std::cerr << "Assimp error: " << importer.GetErrorString() << std::endl;
+        return;
+    }
+
+    aiMesh* mesh = scene->mMeshes[0];
+
+    GET_POINTER_IN_ARENA(*vertexArena, Vertex, aVertices);
+    Vertex* currentVertex = aVertices;
+    GET_POINTER_IN_ARENA(*indicesArena, Face, aFaces);
+    Face* currentFace = aFaces;
+
+    u32 vertexNum = mesh->mNumVertices;
+    u32 faceNum   = mesh->mNumFaces;
+
+    for(u32 i = 0; i < vertexNum; i++){
+        Vertex v = {};
+        v.position.x = mesh->mVertices[i].x;
+        v.position.y = mesh->mVertices[i].y;
+        v.position.z = mesh->mVertices[i].z;
+        v.position.w = 1.0f;
+        if(mesh->HasNormals()){
+            v.normal.x = mesh->mNormals[i].x;
+            v.normal.y = mesh->mNormals[i].y;
+            v.normal.z = mesh->mNormals[i].z;
+            v.normal.w = modelIndex;
+        }
+        if(mesh->HasVertexColors(0)){
+            v.color.r = mesh->mColors[0][i].r;
+            v.color.g = mesh->mColors[0][i].g;
+            v.color.b = mesh->mColors[0][i].b;
+            v.color.a = mesh->mColors[0][i].a;
+        } else {
+            v.color = glm::vec4(0.0f);
+        }
+        *currentVertex = v;
+        currentVertex++;
+    }
+    for(u32 i = 0; i < faceNum; i++){
+        aiFace& aFace = mesh->mFaces[i];
+        Face f = {};
+        f.indices[0] = aFace.mIndices[0] + indicesOffset;
+        f.indices[1] = aFace.mIndices[1] + indicesOffset;
+        f.indices[2] = aFace.mIndices[2] + indicesOffset;
+        *currentFace = f;
+        currentFace++;
+    }
+    PUSH_POINTER_IN_ARENA(*vertexArena, Vertex, vertexNum);
+    PUSH_POINTER_IN_ARENA(*indicesArena, Face, faceNum);
+    numVertices = vertexNum;
+    numFaces    = faceNum;
+    glm::mat4 scale = glm::scale(glm::mat4(1.0f), worldScale);
+    glm::mat4 trans = glm::translate(glm::mat4(1.0f), worldPos);
+    modelMatrix = trans * scale;
+    printf("Loaded %s: %d vertices, %d faces\n", modelPath.c_str(), vertexNum, faceNum);
+}
+
+/* OLD:
 void Model::loadModel(std::string &modelPath, glm::vec3 worldPos, glm::vec3 worldRotate, glm::vec3 worldScale, u32 modelIndex, u32 indicesOffset, Arena* vertexArena, Arena* indicesArena){
     std::vector<unsigned int> vertexInfo; // Flag for each vertex, if it's duplicated or not.
     GET_POINTER_IN_ARENA(*vertexArena, Vertex, aVertices);
@@ -126,6 +197,7 @@ void Model::loadModel(std::string &modelPath, glm::vec3 worldPos, glm::vec3 worl
     printf("The index is: %d\n", aFaces->indices[0]);
     //printf("The number of indices is: %d \n", numFaces * 3);
 }
+*/
 
 ModelData* Models::loadModels(const std::string &modelInfoPath, u32 minModelSizeInBytes){
     vertexArena.reserveArena(minModelSizeInBytes);
@@ -185,7 +257,12 @@ ModelData* Models::loadModels(const std::string &modelInfoPath, u32 minModelSize
     u32 modelIndicesOffset = 0;
     for(size_t i = 0; i < modelNum; i++){
         models[i].loadModel(actualPath[i], modelWorldPos[i], modelWorldRot[i], modelWorldScl[i], i, modelIndicesOffset, &vertexArena, &indicesArena);
-        modelIndicesOffset += (models[i].numFaces * 3);
+        printf("Model %zu first 3 indices: %d %d %d\n", 
+        i,
+        models[i].aFaces[0].indices[0],
+        models[i].aFaces[0].indices[1],
+        models[i].aFaces[0].indices[2]);
+        modelIndicesOffset += models[i].numVertices;
     }
     printf("The index in 'models' is: %d\n", models[0].aFaces->indices[0]);
     ARENA_ERROR error;
