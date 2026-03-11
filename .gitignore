@@ -12,4 +12,5 @@ CMakeLists.txt
 include/D3D12/
 include/glm/
 include/SDL3/
+include/assimp/
 *.dll

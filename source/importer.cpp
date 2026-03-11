@@ -10,7 +10,6 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
-
 void Model::loadModel(std::string &modelPath, glm::vec3 worldPos, glm::vec3 worldRotate, glm::vec3 worldScale, u32 modelIndex, u32 indicesOffset, Arena* vertexArena, Arena* indicesArena){
     Assimp::Importer importer;
     const aiScene* scene = importer.ReadFile(modelPath,

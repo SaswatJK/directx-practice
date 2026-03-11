@@ -219,8 +219,8 @@ void Engine::prepareData(){
         allModelIndicesSize += models->modelIndices->PSPArray.arr[i].size;
         allModelVerticesSize += models->modelVertices->VSPArray.arr[i].size;
     }
-    perModelConstantData = (char*)malloc(256 * numOfModels);
-
+    this->lights = Lighting::initLights(1);
+    this->lights.insertDirectionalLight(glm::vec4(0.7, 0.7, 0.7, 1.0), glm::vec4(1.0, 0.8, 1.0, 1.0));
     // Cause the BLAS and TLAS start reading from the start of the vertex buffer, we will make it easy for ourselves and just put the models before the quad.
     VertexSizePair triAndQuad[2]; //Makes them congiguous.
     triAndQuad[0].data = models->modelVertices->VSPArray.arr->data;
@@ -248,10 +248,20 @@ void Engine::prepareData(){
     perFrameConstantBufferPairs[0].size = 256;
     perFrameConstantBufferData.PSPArray.arr = perFrameConstantBufferPairs;
     perFrameConstantBufferData.PSPArray.count = 1;
+
+    DataArray lightConstantBufferData =  {};
+    PtrSizePair lightConstantBufferPairs[1];
+    lightConstantBufferPairs[0].data = this->lights.lights;
+    lightConstantBufferPairs[0].size = 256;
+    lightConstantBufferData.PSPArray.arr = lightConstantBufferPairs;
+    lightConstantBufferData.PSPArray.count = 1;
+
     UINT totalSizeByCount = (getVSPDataSize(vertexData)/65536) + 1;
     totalSizeByCount += (getPSPDataSize(indexData)/65536) + 1;
     totalSizeByCount += (getPSPDataSize(perFrameConstantBufferData)/65536) + 1;
+    totalSizeByCount += (getPSPDataSize(lightConstantBufferData)/65536) + 1;
     totalSizeByCount += (getPSPDataSize(*models->modelMatrices)/65536) + 1;
+
     //Creating upload Heap.
     Heap::createHeap(totalSizeByCount, heapInfo::HEAP_UPLOAD, d3D, resource);
     //PrintDebugMessages();
@@ -298,7 +308,7 @@ void Engine::prepareData(){
     constantBufferOffset = resource.descriptorInHeapCount[dhInfo::DH_SRV_CBV_UAV];
     std::cerr<<"Constant buffer offset is: "<<constantBufferOffset;
     Resource::initPerFrameConstantBuffer(perFrameConstantBufferData, d3D, resource);
-    Resource::initPerModelConstantBuffer(*models->modelMatrices, d3D, resource);
+    Resource::initConstantBuffer(lightConstantBufferData, d3D, resource);
     //PrintDebugMessages();
     fenceValue++;
     //Creating a bindless root singature.
@@ -564,12 +574,15 @@ void Engine::render(){
         D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
         dispatchDesc.RayGenerationShaderRecord.StartAddress = resource.rayGenTableAddress;
         dispatchDesc.RayGenerationShaderRecord.SizeInBytes = resource.shaderRecordSize;
+
         dispatchDesc.MissShaderTable.StartAddress = resource.missTableAddress;
-        dispatchDesc.MissShaderTable.SizeInBytes = resource.shaderRecordSize;
+        dispatchDesc.MissShaderTable.SizeInBytes = 2 * resource.shaderRecordSize;
         dispatchDesc.MissShaderTable.StrideInBytes = resource.shaderRecordSize;
+
         dispatchDesc.HitGroupTable.StartAddress = resource.hitGroupTableAddress;
         dispatchDesc.HitGroupTable.SizeInBytes = resource.hitGroupTableSize;
         dispatchDesc.HitGroupTable.StrideInBytes = resource.shaderRecordSize;
+
         dispatchDesc.Width = windowWidth;
         dispatchDesc.Height = windowHeight;
         dispatchDesc.Depth = 1;

@@ -9,13 +9,14 @@
 
 class Engine{
 private:
+    D3DGlobal d3D;
+    D3DResources resource;
+    std::vector<uint32_t> modelIndices;
     UINT windowWidth = 1000;
     UINT windowHeight = 1000;
     SDL_Window* window;
     HRESULT hr;
     HWND hwnd; //Window handler.
-    D3DGlobal d3D;
-    D3DResources resource;
     Microsoft::WRL::ComPtr<ID3D12InfoQueue> infoQueue;
     void PrintDebugMessages();
     UINT renderTextureOffset; //Offset in the texture2D array of 'd3d12 resource', which offset the render texture is in.
@@ -25,10 +26,8 @@ private:
     UINT uavDescriptorOffset;
     UINT fenceValue = 1;
     char* perFrameConstantData;
-    char* perModelConstantData;
-    std::vector<uint32_t> modelIndices;
     Camera* camera;
-//    SDL_WINDOW* window = nullptr;
+    Lighting::Lights lights;
 public:
     Engine();
     void prepareData();
