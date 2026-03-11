@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <intsafe.h>
 #include <minwindef.h>
+#include <stdlib.h>
 #include <winnt.h>
 #include <wrl/client.h>
 
@@ -508,19 +509,18 @@ void Resource::updateConstantBuffer(const DataArray &data, bufferInfo buffer, co
         }
         resources.buffers[BUFFER_PER_FRAME_CONSTANT]->Unmap(0, nullptr);
     }
-
-    else if(buffer == bufferInfo::BUFFER_PER_MODEL_CONSTANT){
-        resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+    else if(buffer == bufferInfo::BUFFER_CONSTANT){
+        resources.buffers[bufferInfo::BUFFER_CONSTANT]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
         UINT8* currentPtr = mappedData;
         for(UINT i = 0; i < data.PSPArray.count; i++){
             memcpy(currentPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
             currentPtr += data.PSPArray.arr[i].size;
         }
-        resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Unmap(0, nullptr);
+        resources.buffers[bufferInfo::BUFFER_CONSTANT]->Unmap(0, nullptr);
     }
 }
 
-void Resource::initPerModelConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources){
+void Resource::initConstantBuffer(const DataArray &data, const D3DGlobal &d3D, D3DResources &resources){
     UINT dataSize = 256; // Size per constant buffer
     UINT numBuffers = data.PSPArray.count;
     UINT totalSize = dataSize * numBuffers;
@@ -543,7 +543,7 @@ void Resource::initPerModelConstantBuffer(const DataArray &data, const D3DGlobal
                                                   resources.heapOffsets[heapInfo::HEAP_UPLOAD], &desc,
                                                   D3D12_RESOURCE_STATE_COMMON, //D3D12_RESOURCE_STATE_GENERIC_READ is a logically OR'd combination of other read-state bits. This is the required starting state for an upload heap. Application should generally avoid transitioning to D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER shoudl be used for subresource while the GPU is accessing vertex or constant buffer, this is GPU only at that state. A subresourece is a portion of a resourece, mip level, array slice, plane of a texture etc, each subresource can be in a different state at any given time.
                                                   nullptr, //optimized clear value
-                                                  IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]));
+                                                  IID_PPV_ARGS(&resources.buffers[bufferInfo::BUFFER_CONSTANT]));
     if(FAILED(hr)){
         std::cerr << "Error: placement for per model constant buffer failed!";
         std::cerr <<"\n"<<hr;
@@ -551,15 +551,15 @@ void Resource::initPerModelConstantBuffer(const DataArray &data, const D3DGlobal
     }
 
     UINT8* mappedData = nullptr;
-    resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
+    resources.buffers[bufferInfo::BUFFER_CONSTANT]->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
     //There will already be the camera and other constant data in the 0'th offset.
     for(UINT i = 0; i < numBuffers; i++){
         UINT8* destPtr = mappedData + (i * dataSize);
         memcpy(destPtr, data.PSPArray.arr[i].data, data.PSPArray.arr[i].size);
     }
-    resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->Unmap(0, nullptr);
+    resources.buffers[bufferInfo::BUFFER_CONSTANT]->Unmap(0, nullptr);
 
-    D3D12_GPU_VIRTUAL_ADDRESS baseAddress = resources.buffers[bufferInfo::BUFFER_PER_MODEL_CONSTANT]->GetGPUVirtualAddress();
+    D3D12_GPU_VIRTUAL_ADDRESS baseAddress = resources.buffers[bufferInfo::BUFFER_CONSTANT]->GetGPUVirtualAddress();
     UINT descriptorSize = d3D.device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     for(UINT i = 0; i < numBuffers; i++){
         D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
@@ -932,17 +932,17 @@ void Resource::createShaderBindingTable(const D3DGlobal& d3D, D3DResources& reso
     //Shader IDs.
     void* rayGenID = stateObjectProps->GetShaderIdentifier(L"RayGen");
     void* missID = stateObjectProps->GetShaderIdentifier(L"Miss");
-    void* hitGroupID = stateObjectProps->GetShaderIdentifier(L"MyHitGroup");
+    void* shadowMissID = stateObjectProps->GetShaderIdentifier(L"ShadowMiss");
+    void* primaryHitGroupID = stateObjectProps->GetShaderIdentifier(L"PrimaryHitGroup");
+    void* shadowHitGroupID  = stateObjectProps->GetShaderIdentifier(L"ShadowHitGroup");
 
     const UINT shaderIdentifierSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;  // 32 byte.
-
     const UINT shaderRecordSize = shaderIdentifierSize;  // Just ID (No root arguments for the specific records).
     const UINT shaderRecordSizeAligned = (shaderRecordSize + 63) & ~63;  // Align to 64.
 
     UINT rayGenTableSize = shaderRecordSizeAligned;
-    UINT missTableSize = shaderRecordSizeAligned;
-    UINT hitGroupTableSize = shaderRecordSizeAligned * resources.BLAS.size();  // Per BLAS.
-
+    UINT missTableSize = shaderRecordSizeAligned * 2;
+    UINT hitGroupTableSize = shaderRecordSizeAligned * 2 * resources.BLAS.size();  // Per BLAS.
     UINT totalSize = rayGenTableSize + missTableSize + hitGroupTableSize;
 
     // Create SBT buffer on the upload heap.
@@ -977,15 +977,19 @@ void Resource::createShaderBindingTable(const D3DGlobal& d3D, D3DResources& reso
 
     // Remember that there's probably only going to be one ray generation shader for most scenes.
     memcpy(currentPtr, rayGenID, shaderIdentifierSize);
-    currentPtr += rayGenTableSize;
+    currentPtr += shaderRecordSizeAligned;
 
     // Same with the miss shader, probably only one per scene (that paints the skybox or something).
     memcpy(currentPtr, missID, shaderIdentifierSize);
-    currentPtr += missTableSize;
+    currentPtr += shaderRecordSizeAligned;
+    memcpy(currentPtr, shadowMissID, shaderIdentifierSize);
+    currentPtr += shaderRecordSizeAligned;
 
     // Hit Group table, for each BLAS, we assume one hitgroup, as each can have different materials and what not.
     for (size_t i = 0; i < resources.BLAS.size(); i++) {
-        memcpy(currentPtr, hitGroupID, shaderIdentifierSize);
+        memcpy(currentPtr, primaryHitGroupID, shaderIdentifierSize);
+        currentPtr += shaderRecordSizeAligned;
+        memcpy(currentPtr, shadowHitGroupID, shaderIdentifierSize);
         currentPtr += shaderRecordSizeAligned;
     }
 
@@ -1006,6 +1010,9 @@ void Resource::createShaderBindingTable(const D3DGlobal& d3D, D3DResources& reso
 // TODO : Make different SRV spaces for vertex buffer, index buffer, textures, so I don't waste 2 hours again.
 void RootSignature::createBindlessRootSignature(const D3DGlobal &d3D, D3DResources &resources){
     //Descriptor range defines a contiguous sequence of resource descriptors of a specific type within a descriptor table. Like the 'width' of a slice, that is descriptor table, of a data, that is descriptor heap.
+    //These ranges basically make it easy while accessing through the shaders. If we have a descriptorheap which stores all the CBVs, and we have classified there's 4 types of CBVs, there could be any number of CBVs. We can just prescribe 4 CBV ranges. Each one can start from an arbitrary offset of the CBV start handle given to the command list. Then in the shader, we can access each Constant buffer by just offsetting among each range, which is already offset to the handle, depending on the range created here.
+    //So, a good thing to do would be to create multiple ranges. Each type of descriptor should have multiple ranges depending on application layer's own abstract requirements. They should be built in-batch, so that we only need to store one handle to the start of all of the ranges. In this case, one descriptor heap can house multipel type of descriptors and we only need to work with one handle and not worry about the offset maths in the shader.
+
     D3D12_DESCRIPTOR_RANGE srvRange = {};
     srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     srvRange.NumDescriptors = 100;
@@ -1201,7 +1208,13 @@ void PipelineState::createDXRSO(const Shader &shader, DXGI_FORMAT format, const 
     std::vector<D3D12_STATE_SUBOBJECT> subobjects;
 
     // One single HLSL file will be made avilable to be refered by name into the number of exports.
-    D3D12_EXPORT_DESC exports[3];  // Ray generation, Miss shader, and ClosestHit.
+    D3D12_EXPORT_DESC exports[] = {
+        { L"RayGen",           nullptr, D3D12_EXPORT_FLAG_NONE },
+        { L"Miss",             nullptr, D3D12_EXPORT_FLAG_NONE },
+        { L"ShadowMiss",       nullptr, D3D12_EXPORT_FLAG_NONE },
+        { L"ClosestHit",       nullptr, D3D12_EXPORT_FLAG_NONE }, // Remember that we can have more than just the Closest hit. We have any hit and ray intersection as well. Those can also be a part of the hitgroup. (All 3 including Closest hit are optional).
+        { L"ShadowClosestHit", nullptr, D3D12_EXPORT_FLAG_NONE },
+    };
 
     SimpleShaderByteCode tempShaderByteCode = shader.getShaderByteCode();
     if(tempShaderByteCode.ByteCode.VSPS.psByteCode.pShaderBytecode != nullptr){
@@ -1209,22 +1222,10 @@ void PipelineState::createDXRSO(const Shader &shader, DXGI_FORMAT format, const 
     }
     D3D12_SHADER_BYTECODE shaderBytecode = shader.getShaderByteCode().ByteCode.rtxByteCode;
 
-    exports[0].Name = L"RayGen";
-    exports[0].ExportToRename = nullptr;
-    exports[0].Flags = D3D12_EXPORT_FLAG_NONE;
-
-    exports[1].Name = L"Miss";
-    exports[1].ExportToRename = nullptr;
-    exports[1].Flags = D3D12_EXPORT_FLAG_NONE;
-
-    exports[2].Name = L"ClosestHit"; // Remember that we can have more than just the Closest hit. We have any hit and ray intersection as well. Those can also be a part of the hitgroup. (All 3 including Closest hit are optional).
-    exports[2].ExportToRename = nullptr;
-    exports[2].Flags = D3D12_EXPORT_FLAG_NONE;
-
     // DirectX Intermmediate Language.
     D3D12_DXIL_LIBRARY_DESC dxilLibDesc = {};
     dxilLibDesc.DXILLibrary = shaderBytecode;
-    dxilLibDesc.NumExports = 3;
+    dxilLibDesc.NumExports = _countof(exports);
     dxilLibDesc.pExports = exports;
 
     D3D12_STATE_SUBOBJECT dxilLib = {};
@@ -1232,22 +1233,34 @@ void PipelineState::createDXRSO(const Shader &shader, DXGI_FORMAT format, const 
     dxilLib.pDesc = &dxilLibDesc;
     subobjects.push_back(dxilLib);
 
-    // Creating a hit group (will be referenced later by the shader records inside the shader table).
-    D3D12_HIT_GROUP_DESC hitGroupDesc = {};
-    hitGroupDesc.HitGroupExport = L"MyHitGroup";
-    hitGroupDesc.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
-    hitGroupDesc.ClosestHitShaderImport = L"ClosestHit";
-    hitGroupDesc.AnyHitShaderImport = nullptr;
-    hitGroupDesc.IntersectionShaderImport = nullptr;
+    // Creating 2 hit groups (will be referenced later by the shader records inside the shader table).
+    D3D12_HIT_GROUP_DESC primaryHitGroupDesc = {};
+    primaryHitGroupDesc.HitGroupExport = L"PrimaryHitGroup";
+    primaryHitGroupDesc.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+    primaryHitGroupDesc.ClosestHitShaderImport = L"ClosestHit";
+    primaryHitGroupDesc.AnyHitShaderImport = nullptr;
+    primaryHitGroupDesc.IntersectionShaderImport = nullptr;
 
-    D3D12_STATE_SUBOBJECT hitGroup = {};
-    hitGroup.Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
-    hitGroup.pDesc = &hitGroupDesc;
-    subobjects.push_back(hitGroup);
+    D3D12_STATE_SUBOBJECT primaryHitGroup = {};
+    primaryHitGroup.Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
+    primaryHitGroup.pDesc = &primaryHitGroupDesc;
+    subobjects.push_back(primaryHitGroup);
+
+    D3D12_HIT_GROUP_DESC secondaryHitGroupDesc = {};
+    secondaryHitGroupDesc.HitGroupExport = L"ShadowHitGroup";
+    secondaryHitGroupDesc.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+    secondaryHitGroupDesc.ClosestHitShaderImport = L"ShadowClosestHit";
+    secondaryHitGroupDesc.AnyHitShaderImport = nullptr;
+    secondaryHitGroupDesc.IntersectionShaderImport = nullptr;
+
+    D3D12_STATE_SUBOBJECT secondaryHitGroup = {};
+    secondaryHitGroup.Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
+    secondaryHitGroup.pDesc = &secondaryHitGroupDesc;
+    subobjects.push_back(secondaryHitGroup);
 
     // Payload attributes.
     D3D12_RAYTRACING_SHADER_CONFIG shaderConfigDesc = {};
-    shaderConfigDesc.MaxPayloadSizeInBytes = 12;  // float3 color = 12 bytes
+    shaderConfigDesc.MaxPayloadSizeInBytes = 16;  // float3 color = 12 bytes + 4 bytes = shadow.
     shaderConfigDesc.MaxAttributeSizeInBytes = 8;  // float2 barycentrics = 8 bytes
 
     D3D12_STATE_SUBOBJECT shaderConfig = {};
@@ -1257,7 +1270,7 @@ void PipelineState::createDXRSO(const Shader &shader, DXGI_FORMAT format, const 
 
     // Pipeline Config - max recursion depth
     D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfigDesc = {};
-    pipelineConfigDesc.MaxTraceRecursionDepth = 1; // Very simple Ray tracing.
+    pipelineConfigDesc.MaxTraceRecursionDepth = 4; // 3 bounces + 1 shadow ray.
 
     D3D12_STATE_SUBOBJECT pipelineConfig = {};
     pipelineConfig.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG;
@@ -1286,3 +1299,68 @@ void PipelineState::createDXRSO(const Shader &shader, DXGI_FORMAT format, const 
     }
     resources.rayTracingState = raytracingStateObject;
 }
+
+Lighting::Lights Lighting::initLights(int numLights){
+    Lighting::Lights tempLights;
+    tempLights.numLights = numLights;
+    tempLights.currLightNum = 0;
+    tempLights.arena.reserveArena(numLights * sizeof(LightInfo) * 2);
+    tempLights.arena.commitArena(numLights * sizeof(LightInfo));
+    ARENA_ERROR err = INITIALIZE_ARRAY_IN_ARENA(tempLights.arena, Lighting::LightInfo, numLights, tempLights.lights);
+    if(err != ARENA_OK){
+        std::cerr << "Creation of array of lights failed.\n";
+        return tempLights;
+    }
+    return tempLights;
+}
+
+Lighting::LIGHT_ERROR Lighting::Lights::insertAreaLight(glm::vec4 endPosA, glm::vec4 endPosB, glm::vec4 vColor, u32 thickness){
+    if(currLightNum >= numLights){
+        std::cerr << "TOO MANY LIGHTS.\n";
+        return LIGHT_NO_SPACE;
+    }
+    Lighting::LightInfo* currLight = &lights[this->currLightNum];
+    currLight->type = LIGHT_AREA;
+    currLight->vColor = vColor;
+    currLight->PerTypeData.AreaLight.endPosA = endPosA;
+    currLight->PerTypeData.AreaLight.endPosB = endPosB;
+    currLight->PerTypeData.AreaLight.thickness = thickness;
+    this->currLightNum++;
+    return LIGHT_OK;
+}
+
+Lighting::LIGHT_ERROR Lighting::Lights::insertPointLight(glm::vec4 vDir, glm::vec4 vPos, glm::vec4 vColor){
+    if(currLightNum >= numLights){
+        std::cerr << "TOO MANY LIGHTS.\n";
+        return LIGHT_NO_SPACE;
+    }
+    Lighting::LightInfo* currLight = &lights[this->currLightNum];
+    currLight->type = LIGHT_POINT;
+    currLight->vColor = vColor;
+    currLight->PerTypeData.PointLight.vPos = vPos;
+    currLight->PerTypeData.PointLight.vDir = vDir;
+    this->currLightNum++;
+    return LIGHT_OK;
+}
+
+Lighting::LIGHT_ERROR Lighting::Lights::insertDirectionalLight(glm::vec4 vDir, glm::vec4 vColor){
+    if(currLightNum >= numLights){
+        std::cerr << "TOO MANY LIGHTS.\n";
+        return LIGHT_NO_SPACE;
+    }
+    Lighting::LightInfo* currLight = &lights[this->currLightNum];
+    currLight->type = LIGHT_DIRECTIONAL;
+    currLight->vColor = vColor;
+    currLight->PerTypeData.DirectionalLight.vDir = vDir;
+    this->currLightNum++;
+    return LIGHT_OK;
+}
+
+Lighting::SLInfo getLight(Lighting::Lights &lights){
+    Lighting::SLInfo info;
+    info.lights = lights.lights;
+    info.numLights = lights.currLightNum;
+    return info;
+}
+
+// ADD SOME FUNCTIONS TO CHANGE LIGHTS.

@@ -82,7 +82,7 @@ typedef enum {
     BUFFER_VERTEX = 0, //Will upload all vertex buffers in teh same resource, and the views will differentiate, am not gonnna do much premature optimisations right now.
     BUFFER_INDEX,
     BUFFER_PER_FRAME_CONSTANT,
-    BUFFER_PER_MODEL_CONSTANT,
+    BUFFER_CONSTANT,
     BUFFER_BLAS_SCRATCH,
     BUFFER_TLAS_DESC,
     BUFFER_TLAS,
